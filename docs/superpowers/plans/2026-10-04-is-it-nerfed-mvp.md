@@ -4,7 +4,7 @@
 
 **Goal:** A Claude Code plugin whose `/is-it-nerfed` skill reads the user's local session logs, has the user's own Claude label prompts, and gives a fair, probability-backed verdict on whether the current model needs more steering than in its first days.
 
-**Architecture:** A stdlib-only Python script runs in two commands. `scan` parses the logs, samples and blinds prompts, and writes batch files. The skill then has Haiku subagents label the batches. `report` validates the labels, runs a cluster-bootstrap verdict, and writes a terminal summary and one self-contained HTML file. The script and Claude talk only through files in `~/.claude/is-it-nerfed/`.
+**Architecture:** A stdlib-only Python script runs in two commands. `scan` parses the logs, samples and blinds prompts, and writes batch files. The skill then has Sonnet subagents label the batches. `report` validates the labels, runs a cluster-bootstrap verdict, and writes a terminal summary and one self-contained HTML file. The script and Claude talk only through files in `~/.claude/is-it-nerfed/`.
 
 **Tech Stack:** Python 3.9 standard library (`json`, `random`, `statistics`, `urllib`, `hashlib`, `dataclasses`), `unittest` for tests, inline SVG for the chart, Claude Code plugin + skill format.
 
@@ -282,7 +282,7 @@ Anchor mix (30, all synthetic, no real user text): 8 new_work, 6 steering/model 
 1. Run `python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" scan` and parse the JSON.
 2. If `status` is not `ok`, show the message and stop.
 3. Tell the user the model, the prompt count, and `estimated_tokens`; ask "Continue?". Stop on no.
-4. For each batch path, start one Agent with `model: "haiku"` (at most 4 at a time). Each agent reads `judge-prompt.md` and its batch file and writes `<labels_dir>/<batch name>`. The same for `to_interpret.jsonl` with the interpretation question (`affects_behavior: yes|no`, `reason`).
+4. For each batch path, start one Agent with `model: "sonnet"` (at most 4 at a time). Each agent reads `judge-prompt.md` and its batch file and writes `<labels_dir>/<batch name>`. The same for `to_interpret.jsonl` with the interpretation question (`affects_behavior: yes|no`, `reason`).
 5. Run `report`. On exit 3, label the retry batch the same way and run `report --final`.
 6. Show the summary lines and offer to open the HTML file.
 

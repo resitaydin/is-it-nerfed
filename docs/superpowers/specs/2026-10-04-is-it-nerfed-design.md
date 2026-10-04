@@ -36,7 +36,8 @@ The tool costs the author nothing. All LLM work runs on the user's own Claude Co
 2. Run `/is-it-nerfed` in any Claude Code session.
 3. The script scans the logs (no LLM) and prints the counts and a token estimate.
 4. Claude asks: "N prompts need a label. This uses about X tokens from your plan. Continue?"
-5. On yes, Claude runs Haiku subagents that label the batches.
+5. On yes, Claude runs Sonnet subagents that label the batches. On 200 real prompts, Haiku
+   reached kappa 0.54 (steering) and 0.20 (cause); Sonnet reached 0.85 and 0.62.
 6. The script calculates the verdict, prints a 5-line summary, and writes one HTML report.
 
 Terminal example:
@@ -57,7 +58,7 @@ pass work through files in the data directory.
 ```
 /is-it-nerfed (SKILL.md)
   ├─ python3 nerf.py scan    → work/to_label/*.jsonl, work/to_interpret.jsonl, prints estimate
-  ├─ Claude asks for consent, then Haiku subagents → work/labels/*.jsonl
+  ├─ Claude asks for consent, then Sonnet subagents → work/labels/*.jsonl
   └─ python3 nerf.py report  → cache merge, anchor check, stats, HTML, terminal summary
 ```
 
@@ -102,7 +103,7 @@ Python 3.9+ standard library only (tests use `unittest`). No install step, no bu
   previous model.
 - Up to 200 prompts per window, sampled at random and spread across days, with a fixed seed.
 - Labels are cached by prompt `uuid`. A later run labels only uncached prompts.
-- Expected first-run size: about 600 prompts, about 1M Haiku tokens.
+- Expected first-run size: about 600 prompts, about 0.9M Sonnet tokens (about 1.4k per prompt).
 
 ### Input per item
 
@@ -152,8 +153,10 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 - Windows: if the model has fewer than 28 active days, split its active days into a first and a
   second half. Otherwise, the first 14 days against the last 14 days. When the model first reaches 28 active days, the baseline result
   is saved to `cache/baselines.json` and reused.
-- Uncertainty: 5,000 cluster-bootstrap resamples of sessions inside each window. Output: the
-  difference (recent minus baseline), a 90% interval, and P(worse) = share of resamples > 0.
+- Uncertainty: 5,000 two-stage cluster-bootstrap resamples per window. Stage 1 resamples the
+  labeled sessions with replacement. Stage 2 draws the model-caused count of each picked session
+  from a binomial with that session's size and rate. Output: the difference (recent minus
+  baseline), a 90% interval, and P(worse) = share of resamples > 0.
 - Verdict, with SESOI = 5 points:
 
 | Verdict | Condition |
@@ -163,6 +166,9 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 | Slightly worse | The interval lies above 0. |
 | Better | The interval lies below 0. |
 | Leaning worse / leaning better | Any other case. Show P(worse) or P(better). |
+
+- Minimum data: a firm verdict needs at least 5 labeled sessions on each side. Below that,
+  the verdict is at most "leaning worse" or "leaning better".
 
 - Project-mix check: repeat the calculation on prompts from projects that appear in both
   windows. If the verdict differs, the report says "your project mix changed" and shows both.

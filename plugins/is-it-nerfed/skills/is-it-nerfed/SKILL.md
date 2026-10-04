@@ -9,7 +9,7 @@ allowed-tools:
 # Is it nerfed?
 
 This skill tells the user whether their model got worse *for them*. A script reads their
-local session logs and samples prompts. Haiku subagents label each prompt: did the user have
+local session logs and samples prompts. Sonnet subagents label each prompt: did the user have
 to steer the model, and was the model the cause? The script then compares a recent window with
 a baseline window and writes a verdict.
 
@@ -55,9 +55,9 @@ Leave out the part for N or M when that number is 0.
 
 If the user says no, stop. Do not label anything.
 
-## 3. Label with Haiku subagents
+## 3. Label with Sonnet subagents
 
-For each path in `batches`, start one Agent with `model: "haiku"` and this prompt (put in the
+For each path in `batches`, start one Agent with `model: "sonnet"` and this prompt (put in the
 real paths):
 
 > Read ${CLAUDE_SKILL_DIR}/judge-prompt.md. Then label every item in <batch path> and write
@@ -65,7 +65,7 @@ real paths):
 
 `<batch file name>` is the last part of the batch path, for example `batch-003.jsonl`.
 
-If `interpret_batch` is not null, start one more Agent with `model: "haiku"`:
+If `interpret_batch` is not null, start one more Agent with `model: "sonnet"`:
 
 > Read ${CLAUDE_SKILL_DIR}/interpret-prompt.md. Then label every item in <interpret_batch>
 > and write the labels to <interpret_labels>. Reply with only: done <lines written>.
@@ -84,7 +84,7 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" report
 
 - Exit code 0: stdout has the summary lines. Go to step 5.
 - Exit code 3: stdout is `{"status": "retry", "batches": [<path>]}`. Label that batch with one
-  Haiku agent, the same way as in step 3. Then run:
+  Sonnet agent, the same way as in step 3. Then run:
 
   ```
   python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" report --final

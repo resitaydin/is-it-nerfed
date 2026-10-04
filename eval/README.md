@@ -10,7 +10,7 @@ The folder `eval/data/` is git-ignored. It holds private prompts.
    The script writes `eval/data/items.jsonl` and `eval/data/key.jsonl`.
    Half of the items come from prompts that follow an interrupt or start with a negation word.
 2. Ask Claude to label `items.jsonl` with `judge-prompt.md`. Write the result to `eval/data/pred.jsonl`.
-   Use one Haiku agent for each 40 items. Use the same dispatch text as the skill.
+   Use one Sonnet agent for each 40 items. Use the same dispatch text as the skill.
 3. Copy `pred.jsonl` to `gold.jsonl`. Correct each line by hand.
    Do not open `key.jsonl` during this step. The key holds the date and the model.
 4. Run `python3 eval/score.py eval/data/gold.jsonl eval/data/pred.jsonl`.
