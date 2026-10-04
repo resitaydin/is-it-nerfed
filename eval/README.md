@@ -32,4 +32,4 @@ The reference is the consensus of independent Opus and Fable labels (175 of 200 
 | ---- | ------- | ---------------- | -------------- | ----------- | ---------------------- | ------------------- |
 | 2026-10-04 | 1 | Haiku, original prompt | 0.54 | 0.20 | 0.13 | 0.33 |
 | 2026-10-04 | 2 | Sonnet, original prompt | 0.85 | 0.62 | 1.00 | 0.67 |
-| 2026-10-04 | 3 | Sonnet, stricter cause rules | pending | pending | pending | pending |
+| 2026-10-04 | 3 | Sonnet, stricter cause rules (reverted) | 0.72 | 0.40 | 1.00 | 0.83 |
