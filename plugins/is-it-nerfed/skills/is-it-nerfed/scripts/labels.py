@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import sample
+
 KINDS = {"new_work", "steering", "other"}
 CAUSES = {"model", "user", "unclear"}
 STEERING_TYPES = {"correction", "rejection", "failure_report", "redirect", None}
@@ -71,3 +73,16 @@ def append_cache(path: Path, records: List[dict]) -> None:
 
 def is_model_steering(label: dict) -> bool:
     return label.get("kind") == "steering" and label.get("cause") == "model"
+
+
+def anchor_agreement(labels_by_id: Dict[str, dict], anchors: List[dict]) -> float:
+    """Share of anchors whose label matches gold kind, and gold cause for steering."""
+    agreed = 0
+    for anchor in anchors:
+        label = labels_by_id.get(sample.item_id("anchor-" + anchor["anchor_id"]))
+        if label is None or label.get("kind") != anchor["gold_kind"]:
+            continue
+        if anchor["gold_kind"] == "steering" and label.get("cause") != anchor["gold_cause"]:
+            continue
+        agreed += 1
+    return agreed / len(anchors)
