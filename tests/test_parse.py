@@ -67,6 +67,17 @@ class ParseSessionTest(unittest.TestCase):
         session = parse.parse_session(PROJ / "truncated.jsonl")
         self.assertEqual([p.text for p in session.prompts], ["First prompt", "Second prompt"])
 
+    def test_non_human_lines_skipped(self):
+        session = parse.parse_session(PROJ / "non_human.jsonl")
+        texts = [p.text for p in session.prompts]
+        self.assertEqual(texts[:2], ["Real prompt", "Second real prompt"])
+        self.assertEqual(len(texts), 3)
+        self.assertEqual(session.prompts[1].history, ["Real prompt"])
+
+    def test_command_message_is_command(self):
+        session = parse.parse_session(PROJ / "non_human.jsonl")
+        self.assertEqual([p.is_command for p in session.prompts], [False, False, True])
+
     def test_is_own_by_command_and_by_data_dir(self):
         self.assertTrue(parse.parse_session(PROJ / "own_run.jsonl").is_own)
         self.assertTrue(parse.parse_session(PROJ / "own_run_tool.jsonl").is_own)
@@ -78,7 +89,7 @@ class LoadSessionsTest(unittest.TestCase):
         ids = {s.session_id for s in parse.load_sessions([ROOT])}
         self.assertNotIn("own_run", ids)
         self.assertNotIn("own_run_tool", ids)
-        self.assertEqual(ids, {"basic", "two_models", "truncated"})
+        self.assertEqual(ids, {"basic", "two_models", "truncated", "non_human"})
 
     def test_subagents_and_empty_sessions_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:

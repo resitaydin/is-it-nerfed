@@ -23,9 +23,9 @@ BLIND_PATTERNS = [re.compile(p) for p in (
     MONTH + r" \d{1,2}(?:st|nd|rd|th)?(?:,? \d{4})?",
     r"\b\d{1,2}(?:st|nd|rd|th)? " + MONTH + r"(?: \d{4})?",
     r"claude-[\w.-]+",
-    r"\b(?:Opus|Sonnet|Haiku|Fable)(?: \d+(?:\.\d+)*)?",
+    r"(?i:\b(?:opus|sonnet|haiku|fable)(?:[ -]?\d+(?:[.-]\d+)*)?(?![a-z]))",
     r"\bv?\d+\.\d+\.\d+\b",
-    r"(?i:\b(?:nerf|nerfed|dumber|degraded)\b)",
+    r"(?i:\b(?:nerf\w*|dumber|degraded)\b)",
 )]
 
 
@@ -73,6 +73,8 @@ def build_item(p: parse.Prompt) -> dict:
     for entry in p.history:
         entry = blind(entry)
         if total + len(entry) > EARLIER_MAX:
+            if not earlier:
+                earlier.append(entry[-EARLIER_MAX:])
             break
         earlier.append(entry)
         total += len(entry)

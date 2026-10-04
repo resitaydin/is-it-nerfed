@@ -54,6 +54,18 @@ class BlindTest(unittest.TestCase):
         for word in ("Sep", "September", "2026", "10:15", "DUMBER", "Degraded"):
             self.assertNotIn(word, out)
 
+    def test_blind_model_names_any_case_and_separator(self):
+        cases = {
+            "opus 4.7 is slow": "[x] is slow",
+            "try sonnet-4-5 now": "try [x] now",
+            "Opus4.7 broke it": "[x] broke it",
+            "HAIKU 5 and Fable": "[x] and [x]",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(sample.blind(text), expected)
+
+    def test_blind_every_nerf_word(self):
+        self.assertEqual(sample.blind("Nerfs, nerfing and nerf"), "[x], [x] and [x]")
 
     def test_blind_keeps_words_that_only_start_with_a_month(self):
         for text in ("Market 5 items", "Use 2 Markdown files", "Decode 3 times", "Mayor 9"):
@@ -71,6 +83,13 @@ class BuildItemTest(unittest.TestCase):
         self.assertLessEqual(sum(len(e) for e in item["earlier_prompts"]), 2000)
         self.assertEqual(len(item["earlier_prompts"]), 3)
         self.assertTrue(item["earlier_prompts"][0].startswith("h0"))
+
+    def test_build_item_cuts_long_newest_earlier_prompt(self):
+        p = make_prompt("u1", history=["y" * 2500 + "TAIL", "older"])
+        earlier = sample.build_item(p)["earlier_prompts"]
+        self.assertEqual(len(earlier), 1)
+        self.assertEqual(len(earlier[0]), 2000)
+        self.assertTrue(earlier[0].endswith("TAIL"))
 
     def test_build_item_blinds_all_fields(self):
         p = make_prompt(text="it got nerfed", prev_agent_text="Opus 5", history=["on 2026-09-01"])

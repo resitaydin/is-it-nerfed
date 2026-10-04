@@ -14,8 +14,11 @@ SYSTEM_PREFIXES = (
     "<task-notification>",
     "<bash-stdout>",
     "<bash-stderr>",
+    "<bash-input>",
     "<system-reminder>",
 )
+COMMAND_PREFIXES = ("<command-name>", "<command-message>", "/")
+NOT_HUMAN_FLAGS = ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")
 OWN_COMMAND = "<command-name>/is-it-nerfed"
 OWN_DATA_DIR = "is-it-nerfed/work/"
 SYNTHETIC_MODEL = "<synthetic>"
@@ -122,7 +125,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
     results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
     session.tool_results += len(results)
     session.tool_errors += sum(1 for b in results if b.get("is_error") is True)
-    if results or line.get("isMeta"):
+    if results or any(line.get(flag) for flag in NOT_HUMAN_FLAGS):
         return
     text = _user_text(content)
     if text is None:
@@ -142,7 +145,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         model=None,
         cli_version=line.get("version", ""),
         is_first=not session.prompts,
-        is_command=text.startswith(("<command-name>", "/")),
+        is_command=text.startswith(COMMAND_PREFIXES),
         after_interrupt=state.interrupted,
         prev_agent_text=state.agent_text,
         history=[p.text for p in reversed(session.prompts)],
