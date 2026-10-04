@@ -1,0 +1,14 @@
+{
+  "name": "is-it-nerfed",
+  "owner": {
+    "name": "resitaydin"
+  },
+  "description": "Tells you if your Claude model got worse for you, from your own session logs.",
+  "plugins": [
+    {
+      "name": "is-it-nerfed",
+      "source": "./plugins/is-it-nerfed",
+      "description": "Checks your own Claude Code session logs to tell if your model got worse for you."
+    }
+  ]
+}
