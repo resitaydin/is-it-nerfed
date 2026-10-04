@@ -1,6 +1,9 @@
 ---
 name: is-it-nerfed
 description: Checks whether the user's Claude model got worse for them, from their own local Claude Code session logs, and gives a verdict plus an HTML report. Use this skill when the user asks if Claude, Opus, Sonnet, or "the model" is nerfed, dumber, lazier, degraded, or worse lately, this week, or since an update, even when the question is casual ("did claude get dumber?", "is opus worse this week"). Do not use it for "nerf" in games, balance patches, or difficulty settings.
+allowed-tools:
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/cli.py:*)
+  - Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py":*)
 ---
 
 # Is it nerfed?
