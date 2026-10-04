@@ -26,5 +26,10 @@ The folder `eval/data/` is git-ignored. It holds private prompts.
 
 ## Attempts
 
-| Date | Prompt change | Kappa steering | Kappa cause | P | R |
-| ---- | ------------- | -------------- | ----------- | - | - |
+The reference is the consensus of independent Opus and Fable labels (175 of 200 items), because the author chose model reference labels instead of hand labels; Opus vs Fable agreement is 0.88 / 0.67, which is the ceiling.
+
+| Date | Attempt | Judge and prompt | Kappa steering | Kappa cause | Model-caused precision | Model-caused recall |
+| ---- | ------- | ---------------- | -------------- | ----------- | ---------------------- | ------------------- |
+| 2026-10-04 | 1 | Haiku, original prompt | 0.54 | 0.20 | 0.13 | 0.33 |
+| 2026-10-04 | 2 | Sonnet, original prompt | 0.85 | 0.62 | 1.00 | 0.67 |
+| 2026-10-04 | 3 | Sonnet, stricter cause rules | pending | pending | pending | pending |
