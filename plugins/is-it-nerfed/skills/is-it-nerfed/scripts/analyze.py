@@ -105,6 +105,11 @@ def session_counts(sessions: List[parse.Session], model: str, window: Window,
     return counts
 
 
+def _version_key(version: str) -> Tuple[Tuple[int, int, str], ...]:
+    """Numeric parts sort by value; non-numeric parts sort after them, as text."""
+    return tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in version.split("."))
+
+
 def _claude_md_edits(chosen: List[parse.Session]) -> int:
     versions: Dict[str, set] = {}
     for s in chosen:
@@ -122,7 +127,7 @@ def side_changes(sessions: List[parse.Session], model: str, window: Window) -> d
     shares = Counter(p.project for p in prompts).most_common(3)
     return {
         "claude_md_edits": _claude_md_edits(chosen),
-        "cli_versions": sorted({p.cli_version for p in prompts if p.cli_version}),
+        "cli_versions": sorted({p.cli_version for p in prompts if p.cli_version}, key=_version_key),
         "median_prompt_chars": int(statistics.median(len(p.text) for p in prompts)) if prompts else 0,
         "top_projects": [(name, n / n_prompts) for name, n in shares],
         "compactions_per_session": sum(s.compactions for s in chosen) / (len(chosen) or 1),
@@ -233,6 +238,8 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
         return out, baselines
     days = model_days(sessions, model)
     windows = windows_for(sessions, model, baselines)
+    out.daily = daily(sessions, model, labels)
+    out.markers = _markers(days, version_dates, incidents)
     if windows is None:
         out.status = "too_early"
         return out, baselines
@@ -256,8 +263,6 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
         prev = session_counts(sessions, out.prev_model, prev_window(sessions, out.prev_model), labels)
         out.compare = _boot(prev, recent_counts)
         out.compare_verdict = stats.verdict(out.compare)
-    out.daily = daily(sessions, model, labels)
-    out.markers = _markers(days, version_dates, incidents)
     out.side = {"base": side_changes(sessions, model, base),
                 "recent": side_changes(sessions, model, recent)}
     out.harness = _harness(interp, version_dates, windows)

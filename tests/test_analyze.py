@@ -117,6 +117,15 @@ class SideChangeTests(unittest.TestCase):
                                      {"/a/CLAUDE.md": "h3"}, {"/a/CLAUDE.md": "h3"}]), 2)
 
 
+class VersionOrderTests(unittest.TestCase):
+    def test_cli_versions_sort_numerically(self):
+        sessions = [make_session("v1", day_n(0), OPUS5, version="2.1.100"),
+                    make_session("v2", day_n(1), OPUS5, version="2.1.99"),
+                    make_session("v3", day_n(2), OPUS5, version="2.1.x")]
+        side = analyze.side_changes(sessions, OPUS5, (day_n(0), day_n(9)))
+        self.assertEqual(side["cli_versions"], ["2.1.99", "2.1.100", "2.1.x"])
+
+
 class RunTests(unittest.TestCase):
     def test_no_model(self):
         old = days_sessions(5, start=date(2026, 6, 1))
@@ -138,6 +147,8 @@ class RunTests(unittest.TestCase):
         self.assertEqual(analysis.status, "too_early")
         self.assertEqual(analysis.model, OPUS5)
         self.assertIsNone(analysis.boot)
+        self.assertEqual(analysis.daily, [(date(2026, 10, 1), 0, 0), (date(2026, 10, 2), 0, 0)])
+        self.assertIsNone(analysis.base)
 
     def test_judge_drift_status(self):
         sessions = days_sessions(10)
