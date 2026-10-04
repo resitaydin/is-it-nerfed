@@ -15,7 +15,8 @@ REPLY_MAX = 1500
 EARLIER_MAX = 2000
 ANCHOR_KEYS = ("prompt", "previous_agent_reply", "earlier_prompts")
 
-MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+MONTH = (r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December"
+         r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\b\.?")
 BLIND_PATTERNS = [re.compile(p) for p in (
     r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?",
     r"\b\d{1,2}:\d{2}(?::\d{2})?\b",

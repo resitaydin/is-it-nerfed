@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import random
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
@@ -54,6 +53,11 @@ class BlindTest(unittest.TestCase):
         out = sample.blind("On Sep 24 and 24 September 2026 at 10:15:30 it got DUMBER, Degraded")
         for word in ("Sep", "September", "2026", "10:15", "DUMBER", "Degraded"):
             self.assertNotIn(word, out)
+
+
+    def test_blind_keeps_words_that_only_start_with_a_month(self):
+        for text in ("Market 5 items", "Use 2 Markdown files", "Decode 3 times", "Mayor 9"):
+            self.assertEqual(sample.blind(text), text)
 
 
 class BuildItemTest(unittest.TestCase):

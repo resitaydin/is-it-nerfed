@@ -48,6 +48,10 @@ class ReadLabelsTest(unittest.TestCase):
             json.dumps(label(id="a", cause="model")),
             "{broken",
             json.dumps(label(id="b")),
+            json.dumps(label(id=["a"])),
+            json.dumps(label(id="c", kind=["steering"])),
+            json.dumps(label(id="c", cause={"x": 1})),
+            json.dumps(label(id="c", steering_type=["correction"])),
         ]
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "out.jsonl"

@@ -20,13 +20,15 @@ def item_text(item: dict) -> str:
 
 
 def valid(label: dict, item: dict) -> bool:
-    evidence = label.get("evidence")
-    if not isinstance(evidence, str) or not _norm(evidence):
+    fields = [label.get(k) for k in ("kind", "cause", "evidence")]
+    steering_type = label.get("steering_type")
+    if not all(isinstance(f, str) for f in fields):
         return False
-    return (label.get("kind") in KINDS
-            and label.get("cause") in CAUSES
-            and label.get("steering_type") in STEERING_TYPES
-            and _norm(evidence) in item_text(item))
+    if steering_type is not None and not isinstance(steering_type, str):
+        return False
+    kind, cause, evidence = fields
+    return (kind in KINDS and cause in CAUSES and steering_type in STEERING_TYPES
+            and bool(_norm(evidence)) and _norm(evidence) in item_text(item))
 
 
 def _read_jsonl(path: Path) -> List[dict]:
@@ -47,9 +49,12 @@ def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[s
     found: Dict[str, dict] = {}
     for path in paths:
         for label in _read_jsonl(path):
-            item = items_by_id.get(label.get("id"))
-            if item is not None and label["id"] not in found and valid(label, item):
-                found[label["id"]] = label
+            label_id = label.get("id")
+            if not isinstance(label_id, str) or label_id in found:
+                continue
+            item = items_by_id.get(label_id)
+            if item is not None and valid(label, item):
+                found[label_id] = label
     return found, [i for i in items_by_id if i not in found]
 
 
