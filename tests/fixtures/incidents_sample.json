@@ -1,0 +1,20 @@
+{
+  "page": {"name": "Claude"},
+  "incidents": [
+    {
+      "name": "Elevated errors on Claude Code",
+      "impact": "major",
+      "started_at": "2026-10-01T16:20:40.767Z",
+      "created_at": "2026-10-01T16:25:00.000Z",
+      "resolved_at": "2026-10-01T18:05:10.000Z",
+      "components": [{"name": "Claude Code"}, {"name": "Claude API"}]
+    },
+    {
+      "name": "Degraded model quality",
+      "impact": "minor",
+      "created_at": "2026-10-03T09:00:00.000Z",
+      "resolved_at": null,
+      "components": []
+    }
+  ]
+}
