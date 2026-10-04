@@ -13,14 +13,14 @@ ITEM = {"id": "a", "prompt": "No, use the  other file", "previous_agent_reply": 
 
 def label(**kw):
     base = {"id": "a", "kind": "steering", "cause": "model", "steering_type": "correction",
-            "evidence": "use the other file"}
+            "evidence": "use the other file", "reasoning": "r"}
     base.update(kw)
     return base
 
 
 class ValidTest(unittest.TestCase):
     def test_valid_accepts_whitespace_variant(self):
-        self.assertTrue(labels.valid(label(evidence="use  the\nother   file", reasoning="r"), ITEM))
+        self.assertTrue(labels.valid(label(evidence="use  the\nother   file"), ITEM))
 
     def test_valid_rejects_fake_evidence(self):
         self.assertFalse(labels.valid(label(evidence="never said this"), ITEM))
@@ -31,6 +31,13 @@ class ValidTest(unittest.TestCase):
         self.assertFalse(labels.valid(label(cause="bogus"), ITEM))
         self.assertFalse(labels.valid(label(steering_type="bogus"), ITEM))
         self.assertTrue(labels.valid(label(kind="other", steering_type=None), ITEM))
+
+    def test_valid_requires_text_reasoning(self):
+        self.assertFalse(labels.valid(label(reasoning=None), ITEM))
+        self.assertFalse(labels.valid(label(reasoning=["r"]), ITEM))
+        no_reasoning = label()
+        del no_reasoning["reasoning"]
+        self.assertFalse(labels.valid(no_reasoning, ITEM))
 
     def test_is_model_steering(self):
         self.assertTrue(labels.is_model_steering(label()))

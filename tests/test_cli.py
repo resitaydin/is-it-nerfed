@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from tests import SCRIPTS
@@ -22,18 +23,18 @@ def _line(kind: str, uuid: str, stamp: str, message: dict) -> str:
                        "timestamp": stamp, "message": message})
 
 
-def write_logs(home: Path) -> None:
+def write_logs(home: Path, per_day: int = PROMPTS_PER_DAY) -> None:
     """Ten active days: 5 on the older model, 5 on the newer model of the same family."""
     project = home / ".claude" / "projects" / "-proj"
     project.mkdir(parents=True)
     for day in range(10):
         model = "claude-opus-5-4" if day < 5 else "claude-opus-5-5"
-        stamp = (date(2026, 9, 1) + timedelta(days=day)).isoformat()
+        start = datetime(2026, 9, 1, 10) + timedelta(days=day)
         lines = []
-        for n in range(PROMPTS_PER_DAY):
+        for n in range(per_day):
             uuid = "u-%d-%d" % (day, n)
-            at = "%sT10:%02d:00.000Z" % (stamp, n * 2)
-            lines.append(_line("user", uuid, at, {"role": "user", "content": "change thing %s %s" % ("abcdefghij"[day], "vwxyz"[n])}))
+            at = (start + timedelta(minutes=2 * n)).isoformat() + ".000Z"
+            lines.append(_line("user", uuid, at, {"role": "user", "content": "change thing %d %d" % (day, n)}))
             lines.append(_line("assistant", "a-" + uuid, at, {
                 "id": "m-" + uuid, "model": model, "role": "assistant",
                 "content": [{"type": "text", "text": "Done with that step."}],
@@ -136,6 +137,15 @@ class CliTest(unittest.TestCase):
         self.assertEqual(again["status"], "ok")
         self.assertEqual(again["prompts_to_label"], 0)
         self.assertEqual(again["batches"], [])
+
+    def test_second_scan_counts_cached_labels_against_the_cap(self):
+        shutil.rmtree(self.home / ".claude")
+        write_logs(self.home, per_day=110)
+        scan = self.scan()
+        self.assertEqual(scan["prompts_to_label"], 600)
+        self.write_labels(scan)
+        self.assertEqual(self.run_cli("report", "--final").returncode, 0)
+        self.assertEqual(self.scan()["prompts_to_label"], 0)
 
     def test_too_early(self):
         for path in sorted((self.home / ".claude" / "projects" / "-proj").glob("*.jsonl")):

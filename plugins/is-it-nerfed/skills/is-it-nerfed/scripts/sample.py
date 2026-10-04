@@ -35,11 +35,18 @@ def eligible(p: parse.Prompt) -> bool:
 
 def select(prompts: List[parse.Prompt], window: Window, cap: int = 200,
            seed: int = 0, skip: Set[str] = frozenset()) -> List[parse.Prompt]:
-    """Pick up to cap eligible prompts in the window, one per day in turn."""
+    """Pick up to cap eligible prompts in the window, one per day in turn.
+
+    Prompts in skip are already labeled: they are not picked, and they count against the cap.
+    """
     start, end = window
     by_day: Dict[object, List[parse.Prompt]] = defaultdict(list)
     for p in prompts:
-        if eligible(p) and p.uuid not in skip and start <= p.timestamp.date() <= end:
+        if not start <= p.timestamp.date() <= end:
+            continue
+        if p.uuid in skip:
+            cap -= 1
+        elif eligible(p):
             by_day[p.timestamp.date()].append(p)
     rng = random.Random(seed)
     queues = []

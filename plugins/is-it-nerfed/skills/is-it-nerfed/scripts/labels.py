@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import sample
 
 KINDS = {"new_work", "steering", "other"}
 CAUSES = {"model", "user", "unclear"}
 STEERING_TYPES = {"correction", "rejection", "failure_report", "redirect", None}
+MIN_ANCHORS = 20  # labeled anchors below which agreement is not measured
 
 
 def _norm(text: str) -> str:
@@ -22,13 +23,13 @@ def item_text(item: dict) -> str:
 
 
 def valid(label: dict, item: dict) -> bool:
-    fields = [label.get(k) for k in ("kind", "cause", "evidence")]
+    fields = [label.get(k) for k in ("kind", "cause", "evidence", "reasoning")]
     steering_type = label.get("steering_type")
     if not all(isinstance(f, str) for f in fields):
         return False
     if steering_type is not None and not isinstance(steering_type, str):
         return False
-    kind, cause, evidence = fields
+    kind, cause, evidence, _ = fields
     return (kind in KINDS and cause in CAUSES and steering_type in STEERING_TYPES
             and bool(_norm(evidence)) and _norm(evidence) in item_text(item))
 
@@ -75,14 +76,15 @@ def is_model_steering(label: dict) -> bool:
     return label.get("kind") == "steering" and label.get("cause") == "model"
 
 
-def anchor_agreement(labels_by_id: Dict[str, dict], anchors: List[dict]) -> float:
-    """Share of anchors whose label matches gold kind, and gold cause for steering."""
-    agreed = 0
-    for anchor in anchors:
-        label = labels_by_id.get(sample.item_id("anchor-" + anchor["anchor_id"]))
-        if label is None or label.get("kind") != anchor["gold_kind"]:
-            continue
-        if anchor["gold_kind"] == "steering" and label.get("cause") != anchor["gold_cause"]:
-            continue
-        agreed += 1
-    return agreed / len(anchors)
+def anchor_agreement(labels_by_id: Dict[str, dict], anchors: List[dict]) -> Optional[float]:
+    """Share of labeled anchors whose label matches gold kind, and gold cause for steering.
+
+    None when fewer than MIN_ANCHORS anchors have a label.
+    """
+    ids = [(a, sample.item_id("anchor-" + a["anchor_id"])) for a in anchors]
+    labeled = [(a, labels_by_id[i]) for a, i in ids if i in labels_by_id]
+    if len(labeled) < MIN_ANCHORS:
+        return None
+    agreed = sum(1 for a, label in labeled if label.get("kind") == a["gold_kind"]
+                 and (a["gold_kind"] != "steering" or label.get("cause") == a["gold_cause"]))
+    return agreed / len(labeled)

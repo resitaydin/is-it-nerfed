@@ -261,10 +261,11 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     if out.status == "ok":
         out.shared_verdict = _shared_verdict(sessions, base_counts, recent_counts, out.verdict)
     out.prev_model = previous_model(sessions, model)
-    if out.prev_model:
+    if out.prev_model and out.status == "ok":
         prev = session_counts(sessions, out.prev_model, prev_window(sessions, out.prev_model), labels)
-        out.compare = _boot(prev, recent_counts)
-        out.compare_verdict = stats.verdict(out.compare)
+        if prev:
+            out.compare = _boot(prev, recent_counts)
+            out.compare_verdict = stats.verdict(out.compare)
     out.side = {"base": side_changes(sessions, model, base),
                 "recent": side_changes(sessions, model, recent)}
     out.harness = _harness(interp, version_dates, windows)

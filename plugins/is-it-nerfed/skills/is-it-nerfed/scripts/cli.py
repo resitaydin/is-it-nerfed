@@ -171,11 +171,10 @@ def report_cmd(args: argparse.Namespace) -> int:
         return EXIT_RETRY
     if missing:
         print("%d items left without a label" % len(missing), file=sys.stderr)
-    anchors = _anchors()
-    anchor_ids = {sample.item_id("anchor-" + a["anchor_id"]) for a in anchors}
     judge = _read_json(paths.judge, {})
-    if anchor_ids & set(found):
-        judge = {"agreement": labels_mod.anchor_agreement(found, anchors), "date": today.isoformat()}
+    agreement = labels_mod.anchor_agreement(found, _anchors())
+    if agreement is not None:
+        judge = {"agreement": agreement, "date": today.isoformat()}
         _write_json(paths.judge, judge)
     cache = labels_mod.load_cache(paths.labels_cache)
     new = [{"uuid": plan["items"][i], **label} for i, label in found.items()

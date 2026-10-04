@@ -172,6 +172,21 @@ class RunTests(unittest.TestCase):
         self.assertIsNotNone(analysis.compare)
         self.assertIn("recent", analysis.side)
 
+    def test_compare_needs_ok_status_and_labels_on_both_sides(self):
+        prev = days_sessions(6, OPUS4, start=date(2026, 6, 1))
+        cur = days_sessions(10, OPUS5, start=date(2026, 9, 20))
+        labels = labels_for(prev + cur, lambda d: d >= date(2026, 9, 25))
+        drift, _ = run(prev + cur, labels, judge_agreement=0.7)
+        self.assertEqual(drift.status, "judge_drift")
+        self.assertIsNone(drift.compare)
+        self.assertIsNone(drift.compare_verdict)
+        cur_only = {p.uuid: labels[p.uuid] for s in cur for p in s.prompts}
+        unlabeled_prev, _ = run(prev + cur, cur_only)
+        self.assertEqual(unlabeled_prev.status, "ok")
+        self.assertEqual(unlabeled_prev.prev_model, OPUS4)
+        self.assertIsNone(unlabeled_prev.compare)
+        self.assertIsNone(unlabeled_prev.compare_verdict)
+
     def test_baseline_frozen_at_28_days(self):
         sessions = days_sessions(28)
         labels = labels_for(sessions, lambda d: d < day_n(14))
