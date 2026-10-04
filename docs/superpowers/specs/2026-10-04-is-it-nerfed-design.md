@@ -16,7 +16,7 @@ The tool costs the author nothing. All LLM work runs on the user's own Claude Co
 
 - One install line. One command to run.
 - A verdict on the first run when the model has at least about 6 active days of data.
-- The A/A test gives a false "worse" or "better" in 10% of runs or fewer.
+- The A/A test gives a false "worse" verdict in 8% of runs or fewer (5% expected from the one-sided test).
 - The planted-nerf test finds a +10 point drop in 80% of runs or more.
 - The judge reaches Cohen's kappa of 0.7 or more on `steering` and on `cause` against the
   author's private labeled set before the first public release.
@@ -64,7 +64,7 @@ pass work through files in the data directory.
 Data directory: `~/.claude/is-it-nerfed/` with `cache/labels.jsonl`, `cache/baselines.json`,
 `work/` (cleared on each scan), and `report-YYYY-MM-DD.html`.
 
-Python 3.9+ standard library only. No install step, no build step.
+Python 3.9+ standard library only (tests use `unittest`). No install step, no build step.
 
 ### Modules
 
@@ -150,7 +150,7 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 - Diagnostics (not in the verdict): total steering rate, interrupts per prompt, tool error rate,
   user edits to agent edits, output tokens per prompt.
 - Windows: if the model has fewer than 28 active days, split its active days into a first and a
-  second half. Otherwise, the first 14 days against the last 14 days. The first baseline result
+  second half. Otherwise, the first 14 days against the last 14 days. When the model first reaches 28 active days, the baseline result
   is saved to `cache/baselines.json` and reused.
 - Uncertainty: 5,000 cluster-bootstrap resamples of sessions inside each window. Output: the
   difference (recent minus baseline), a 90% interval, and P(worse) = share of resamples > 0.
@@ -200,7 +200,7 @@ The report stays local. It contains the user's own words.
 | Layer | Check | When |
 |---|---|---|
 | Unit tests | Synthetic JSONL fixtures: duplicate `message.id`, `<synthetic>`, sidechains, interrupts, own-session exclusion, CLAUDE.md hash. | Every commit |
-| A/A test | Random session split on fixture data, 200 runs: "worse"/"better" verdicts ≤ 10%. | Every commit |
+| A/A test | Random session split on fixture data, 200 runs: false "worse" verdicts ≤ 8%, false "better" ≤ 8%. | Every commit |
 | Planted-nerf test | Add +10 points of model-caused steering to the recent window: "worse" verdicts ≥ 80%. | Every commit |
 | Judge eval | `eval/` harness: precision, recall, kappa on the author's private labeled set (~200 prompts, git-ignored). Target kappa ≥ 0.7. | Before release, and on every `judge-prompt.md` change |
 
