@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import json
+import random
+import tempfile
+import unittest
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+import parse
+import sample
+
+
+def make_prompt(uuid="u", day=1, **kw):
+    fields = dict(
+        uuid=uuid, session_id="s", project="p",
+        timestamp=datetime(2026, 9, day, 10, 0, tzinfo=timezone.utc),
+        text="hello", model=None, cli_version="2.1.0",
+        is_first=False, is_command=False, after_interrupt=False,
+        prev_agent_text="", history=[],
+    )
+    fields.update(kw)
+    return parse.Prompt(**fields)
+
+
+class SelectTest(unittest.TestCase):
+    def test_select_cap_round_robin(self):
+        prompts = [make_prompt("d%d-%d" % (d, i), day=d) for d in range(1, 11) for i in range(50)]
+        window = (date(2026, 9, 1), date(2026, 9, 10))
+        picked = sample.select(prompts, window, cap=200)
+        self.assertEqual(len(picked), 200)
+        for d in range(1, 11):
+            self.assertEqual(sum(1 for p in picked if p.timestamp.day == d), 20)
+        again = sample.select(prompts, window, cap=200)
+        self.assertEqual([p.uuid for p in picked], [p.uuid for p in again])
+
+    def test_select_skips_cached_and_ineligible(self):
+        prompts = [
+            make_prompt("ok"), make_prompt("cached"),
+            make_prompt("first", is_first=True), make_prompt("cmd", is_command=True),
+            make_prompt("late", day=20),
+        ]
+        picked = sample.select(prompts, (date(2026, 9, 1), date(2026, 9, 10)), skip={"cached"})
+        self.assertEqual([p.uuid for p in picked], ["ok"])
+
+
+class BlindTest(unittest.TestCase):
+    def test_blind(self):
+        out = sample.blind("Opus 5.5 on 2026-09-24 got nerfed, v2.1.285, claude-opus-5-5")
+        for word in ("Opus", "2026", "nerfed", "2.1.285", "claude-"):
+            self.assertNotIn(word, out)
+
+    def test_blind_dates_times_and_words(self):
+        out = sample.blind("On Sep 24 and 24 September 2026 at 10:15:30 it got DUMBER, Degraded")
+        for word in ("Sep", "September", "2026", "10:15", "DUMBER", "Degraded"):
+            self.assertNotIn(word, out)
+
+
+class BuildItemTest(unittest.TestCase):
+    def test_build_item_truncation(self):
+        history = ["h%d " % i + "x" * 600 for i in range(10)]
+        p = make_prompt("u1", prev_agent_text="a" * 3500 + "END" * 500, history=history)
+        item = sample.build_item(p)
+        self.assertEqual(item["id"], sample.item_id("u1"))
+        self.assertEqual(len(item["previous_agent_reply"]), 1500)
+        self.assertTrue(item["previous_agent_reply"].endswith("END"))
+        self.assertLessEqual(sum(len(e) for e in item["earlier_prompts"]), 2000)
+        self.assertEqual(len(item["earlier_prompts"]), 3)
+        self.assertTrue(item["earlier_prompts"][0].startswith("h0"))
+
+    def test_build_item_blinds_all_fields(self):
+        p = make_prompt(text="it got nerfed", prev_agent_text="Opus 5", history=["on 2026-09-01"])
+        item = sample.build_item(p)
+        self.assertEqual(item["prompt"], "it got [x]")
+        self.assertEqual(item["previous_agent_reply"], "[x]")
+        self.assertEqual(item["earlier_prompts"], ["on [x]"])
+
+
+class WriteBatchesTest(unittest.TestCase):
+    def test_write_batches_hides_anchor_gold(self):
+        items = [{"id": "i%d" % n, "prompt": "p", "previous_agent_reply": "", "earlier_prompts": []}
+                 for n in range(45)]
+        anchors = [{"anchor_id": "a%d" % n, "prompt": "p", "previous_agent_reply": "",
+                    "earlier_prompts": [], "gold_kind": "steering", "gold_cause": "model"}
+                   for n in range(30)]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = sample.write_batches(items, anchors, Path(tmp))
+            self.assertEqual([p.name for p in paths], ["batch-001.jsonl", "batch-002.jsonl"])
+            lines = [json.loads(l) for p in paths for l in p.read_text().splitlines()]
+        self.assertEqual(len(lines), 75)
+        for line in lines:
+            self.assertEqual(set(line), {"id", "prompt", "previous_agent_reply", "earlier_prompts"})
+        self.assertIn(sample.item_id("anchor-a0"), {l["id"] for l in lines})
+
+    def test_estimate_tokens(self):
+        items = [{"id": "x"}]
+        self.assertEqual(sample.estimate_tokens(items, 2), len(json.dumps(items[0])) // 4 + 6000 + 120)
+
+
+if __name__ == "__main__":
+    unittest.main()
