@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -9,6 +11,7 @@ import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from tests import SCRIPTS
 
@@ -146,6 +149,30 @@ class CliTest(unittest.TestCase):
         self.write_labels(scan)
         self.assertEqual(self.run_cli("report", "--final").returncode, 0)
         self.assertEqual(self.scan()["prompts_to_label"], 0)
+
+    def scan_in_process(self, *args: str) -> dict:
+        import cli
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}), contextlib.redirect_stdout(out):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(cli.main(["scan", "--today", TODAY, "--data-dir", str(self.data), *args]), 0)
+        return json.loads(out.getvalue())
+
+    def test_estimate_includes_interpret_batch(self):
+        import overlay
+        import sample
+        day9 = self.home / ".claude" / "projects" / "-proj" / "day9.jsonl"
+        day9.write_text(day9.read_text().replace("2.1.280", "2.1.290"))
+        offline = self.scan_in_process("--offline")
+        pages = {"CHANGELOG": "## 2.1.290\n- Changed the default effort level\n",
+                 "incidents": '{"incidents": []}'}
+        fake = lambda url, timeout=10: next(v for k, v in pages.items() if k in url)
+        with mock.patch.object(overlay, "fetch", fake):
+            online = self.scan_in_process()
+        self.assertEqual(online["interpret_items"], 1)
+        rows = [json.loads(l) for l in Path(online["interpret_batch"]).read_text().splitlines()]
+        extra = sample.estimate_tokens(rows, 1)
+        self.assertEqual(online["estimated_tokens"], offline["estimated_tokens"] + extra)
 
     def test_too_early(self):
         for path in sorted((self.home / ".claude" / "projects" / "-proj").glob("*.jsonl")):

@@ -43,13 +43,15 @@ It prints one JSON object. Read `status`:
 
 ## 2. Ask for consent
 
-If `batches` is empty, all prompts already have a label from an earlier run. Skip to step 4
-(if `interpret_batch` is not null, do step 3 for it first, without the question).
+If `batches` is empty and `interpret_batch` is null, nothing needs a label. Skip to step 4.
 
-Otherwise ask, with N = `prompts_to_label` and X = `estimated_tokens` rounded to the nearest
-thousand (for example 463,210 → "about 463k tokens"):
+Otherwise ask, with N = `prompts_to_label`, M = `interpret_items` and X = `estimated_tokens`
+rounded to the nearest thousand (for example 463,210 → "about 463k tokens"). X includes the
+changelog lines.
 
-> <N> prompts need a label. This uses about <X> tokens from your plan. Continue?
+> <N> prompts and <M> changelog lines need a label. This uses about <X> tokens from your plan. Continue?
+
+Leave out the part for N or M when that number is 0.
 
 If the user says no, stop. Do not label anything.
 

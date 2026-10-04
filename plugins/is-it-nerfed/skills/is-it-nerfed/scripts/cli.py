@@ -132,10 +132,11 @@ def scan(args: argparse.Namespace) -> int:
         "model": model, "today": today.isoformat(), "overlay_ok": interpret is not None,
         "windows": {"base": _iso(windows[0]), "recent": _iso(windows[1]), "prev": _iso(prev_win)},
         "items": {sample.item_id(u): u for u in picked}})
+    lines = interpret or []
     result.update(prompts_to_label=len(items), batches=[str(b) for b in batches],
-                  interpret_batch=str(paths.to_interpret) if interpret else None,
-                  interpret_items=len(interpret or []),
-                  estimated_tokens=sample.estimate_tokens(items, len(batches)))
+                  interpret_batch=str(paths.to_interpret) if lines else None,
+                  interpret_items=len(lines),
+                  estimated_tokens=sample.estimate_tokens(items + lines, len(batches) + bool(lines)))
     _emit(result)
     return 0
 

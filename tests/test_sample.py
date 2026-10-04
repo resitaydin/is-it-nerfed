@@ -117,7 +117,7 @@ class WriteBatchesTest(unittest.TestCase):
 
     def test_estimate_tokens(self):
         items = [{"id": "x"}]
-        self.assertEqual(sample.estimate_tokens(items, 2), len(json.dumps(items[0])) // 4 + 6000 + 120)
+        self.assertEqual(sample.estimate_tokens(items, 2), len(json.dumps(items[0])) // 4 + 40000 + 400)
 
 
 if __name__ == "__main__":

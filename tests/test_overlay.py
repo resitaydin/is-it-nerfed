@@ -57,6 +57,9 @@ class IncidentTest(unittest.TestCase):
         self.assertIsNone(incidents[1].end)
         self.assertEqual(incidents[1].components, [])
 
+    def test_parse_incidents_bad_json(self):
+        self.assertEqual(overlay.parse_incidents("<html>502 Bad Gateway</html>"), [])
+
 
 class FetchTest(unittest.TestCase):
     def test_fetch_returns_none_on_error(self):
@@ -73,6 +76,10 @@ class VersionFirstSeenTest(unittest.TestCase):
             overlay.version_first_seen(sessions),
             {"2.1.1": date(2026, 9, 2), "2.1.2": date(2026, 9, 5)},
         )
+
+    def test_version_first_seen_skips_empty_version(self):
+        sessions = [make_session(make_prompt(2, ""), make_prompt(3, "2.1.1"))]
+        self.assertEqual(overlay.version_first_seen(sessions), {"2.1.1": date(2026, 9, 3)})
 
 
 if __name__ == "__main__":

@@ -112,4 +112,4 @@ def write_batches(items: List[dict], anchors: List[dict], out_dir: Path,
 
 def estimate_tokens(items: List[dict], n_batches: int) -> int:
     return (sum(len(json.dumps(i)) // 4 for i in items)
-            + 3000 * n_batches + 120 * len(items))
+            + 20000 * n_batches + 400 * len(items))

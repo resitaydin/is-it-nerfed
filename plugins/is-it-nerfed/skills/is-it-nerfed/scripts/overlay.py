@@ -55,6 +55,8 @@ def version_first_seen(sessions: List[parse.Session]) -> Dict[str, date]:
     first: Dict[str, date] = {}
     for session in sessions:
         for prompt in session.prompts:
+            if not prompt.cli_version:
+                continue
             day = prompt.timestamp.date()
             if prompt.cli_version not in first or day < first[prompt.cli_version]:
                 first[prompt.cli_version] = day
@@ -66,8 +68,12 @@ def _parse_time(value: str) -> datetime:
 
 
 def parse_incidents(text: str) -> List[Incident]:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
     incidents = []
-    for raw in json.loads(text).get("incidents", []):
+    for raw in data.get("incidents", []):
         resolved = raw.get("resolved_at")
         incidents.append(Incident(
             name=raw["name"],
