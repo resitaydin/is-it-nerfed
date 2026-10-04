@@ -245,12 +245,14 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
         return out, baselines
     base, recent = windows
     drift = judge_agreement is not None and judge_agreement < DRIFT_THRESHOLD
-    out.status = "judge_drift" if drift else "ok"
+    out.status = "ok"
     base_counts, saved = _base_counts(sessions, model, base, labels, baselines)
     recent_counts = session_counts(sessions, model, recent, labels)
     no_labels = not sum(c[2] for c in base_counts) or not sum(c[2] for c in recent_counts)
-    if no_labels and not drift:
+    if no_labels:
         out.status = "no_labels"
+    elif drift:
+        out.status = "judge_drift"
     if out.status != "ok" or len(days) < FREEZE_DAYS:
         saved = baselines
     out.base, out.recent = base, recent

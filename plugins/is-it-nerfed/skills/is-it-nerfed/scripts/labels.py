@@ -33,7 +33,7 @@ def valid(label: dict, item: dict) -> bool:
             and bool(_norm(evidence)) and _norm(evidence) in item_text(item))
 
 
-def _read_jsonl(path: Path) -> List[dict]:
+def read_jsonl(path: Path) -> List[dict]:
     if not path.exists():
         return []
     rows = []
@@ -50,7 +50,7 @@ def _read_jsonl(path: Path) -> List[dict]:
 def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[str, dict], List[str]]:
     found: Dict[str, dict] = {}
     for path in paths:
-        for label in _read_jsonl(path):
+        for label in read_jsonl(path):
             label_id = label.get("id")
             if not isinstance(label_id, str) or label_id in found:
                 continue
@@ -61,7 +61,7 @@ def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[s
 
 
 def load_cache(path: Path) -> Dict[str, dict]:
-    return {r["uuid"]: r for r in _read_jsonl(path) if "uuid" in r}
+    return {r["uuid"]: r for r in read_jsonl(path) if "uuid" in r}
 
 
 def append_cache(path: Path, records: List[dict]) -> None:

@@ -71,14 +71,14 @@ def _iso(window) -> Optional[List[str]]:
 def _batch_items(paths: Paths) -> Dict[str, dict]:
     items: Dict[str, dict] = {}
     for path in sorted(paths.to_label.glob("*.jsonl")):
-        for row in labels_mod._read_jsonl(path):
+        for row in labels_mod.read_jsonl(path):
             items.setdefault(row["id"], row)
     return items
 
 
 def _interp_cache(paths: Paths) -> Dict[str, dict]:
     cache: Dict[str, dict] = {}
-    for row in labels_mod._read_jsonl(paths.interp_cache):
+    for row in labels_mod.read_jsonl(paths.interp_cache):
         cache.setdefault(row["id"], row)
     return cache
 
@@ -141,10 +141,10 @@ def scan(args: argparse.Namespace) -> int:
 
 
 def _merge_interp(paths: Paths) -> Dict[str, dict]:
-    asked = {r["id"]: r for r in labels_mod._read_jsonl(paths.to_interpret)}
+    asked = {r["id"]: r for r in labels_mod.read_jsonl(paths.to_interpret)}
     new = []
     cache = _interp_cache(paths)
-    for row in labels_mod._read_jsonl(paths.interp_labels):
+    for row in labels_mod.read_jsonl(paths.interp_labels):
         item = asked.get(row.get("id"))
         if item is None or item["id"] in cache or row.get("affects_behavior") not in ("yes", "no"):
             continue
@@ -174,7 +174,7 @@ def report_cmd(args: argparse.Namespace) -> int:
     anchors = _anchors()
     anchor_ids = {sample.item_id("anchor-" + a["anchor_id"]) for a in anchors}
     judge = _read_json(paths.judge, {})
-    if anchor_ids & set(items):
+    if anchor_ids & set(found):
         judge = {"agreement": labels_mod.anchor_agreement(found, anchors), "date": today.isoformat()}
         _write_json(paths.judge, judge)
     cache = labels_mod.load_cache(paths.labels_cache)

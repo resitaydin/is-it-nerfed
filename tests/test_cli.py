@@ -111,6 +111,14 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("1 items left without a label", result.stderr)
 
+    def test_report_final_with_zero_labels_names_no_labels(self):
+        self.scan()
+        result = self.run_cli("report", "--final")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no labeled prompts", result.stdout)
+        self.assertNotIn("judge", result.stdout)
+        self.assertFalse((self.data / "cache" / "judge.json").exists())
+
     def test_no_logs_exit_2(self):
         empty = Path(self._tmp.name) / "empty"
         empty.mkdir()
