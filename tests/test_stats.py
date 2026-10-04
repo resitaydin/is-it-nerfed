@@ -7,6 +7,7 @@ import stats
 from tests.synth import make_counts
 
 WORSE = ("slightly_worse", "clearly_worse")
+LEANING = ("leaning_worse", "leaning_better")
 
 
 def days(n):
@@ -14,8 +15,8 @@ def days(n):
     return [start + timedelta(days=i) for i in range(n)]
 
 
-def result(lo, hi, diff=0.0, p_worse=0.5):
-    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 100, 100)
+def result(lo, hi, diff=0.0, p_worse=0.5, sessions=10):
+    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 100, 100, sessions, sessions)
 
 
 class WindowsTest(unittest.TestCase):
@@ -48,6 +49,16 @@ class BootstrapTest(unittest.TestCase):
         self.assertEqual(r.base_rate, 0)
         self.assertEqual(r.recent_rate, 50.0)
 
+    def test_counts_labeled_sessions_per_side(self):
+        r = stats.cluster_bootstrap([("a", 0, 0), ("b", 1, 4)], [("c", 1, 2), ("d", 0, 3)], n=50)
+        self.assertEqual((r.s_base, r.s_recent), (1, 2))
+
+    def test_one_session_per_side_resamples_prompts(self):
+        r = stats.cluster_bootstrap([("a", 1, 10)], [("b", 3, 10)], n=5000)
+        self.assertEqual(r.diff, 20.0)
+        self.assertLess(r.lo, r.hi)
+        self.assertIn(stats.verdict(r), LEANING)
+
 
 class VerdictTest(unittest.TestCase):
     def test_verdict_table(self):
@@ -63,20 +74,39 @@ class VerdictTest(unittest.TestCase):
         for r, expected in rows:
             self.assertEqual(stats.verdict(r), expected, r)
 
+    def test_few_sessions_give_only_leaning(self):
+        few = stats.MIN_SESSIONS - 1
+        rows = [
+            (result(lo=1, hi=4, p_worse=0.7, sessions=few), "leaning_worse"),
+            (result(lo=6, hi=20, diff=12, p_worse=1.0, sessions=few), "leaning_worse"),
+            (result(lo=-20, hi=-6, diff=-12, p_worse=0.0, sessions=few), "leaning_better"),
+        ]
+        for r, expected in rows:
+            self.assertEqual(stats.verdict(r), expected, r)
+
 
 class CalibrationTest(unittest.TestCase):
-    def verdicts(self, base_rate, recent_rate):
+    def verdicts(self, base_rate, recent_rate, n_sessions=40, prompts_per=8):
         out = []
         for seed in range(200):
-            base = make_counts(40, 8, base_rate, seed * 2)
-            recent = make_counts(40, 8, recent_rate, seed * 2 + 1)
+            base = make_counts(n_sessions, prompts_per, base_rate, seed * 2)
+            recent = make_counts(n_sessions, prompts_per, recent_rate, seed * 2 + 1)
             out.append(stats.verdict(stats.cluster_bootstrap(base, recent, n=1000, seed=seed)))
         return out
 
-    def test_aa_false_alarm_rate(self):
-        v = self.verdicts(0.12, 0.12)
+    def assert_false_alarms(self, n_sessions, prompts_per):
+        v = self.verdicts(0.12, 0.12, n_sessions, prompts_per)
         self.assertLessEqual(sum(x in WORSE for x in v) / 200, 0.08)
         self.assertLessEqual(sum(x == "better" for x in v) / 200, 0.08)
+
+    def test_aa_false_alarm_rate(self):
+        self.assert_false_alarms(40, 8)
+
+    def test_aa_false_alarm_rate_3_sessions(self):
+        self.assert_false_alarms(3, 30)
+
+    def test_aa_false_alarm_rate_5_sessions(self):
+        self.assert_false_alarms(5, 20)
 
     def test_planted_nerf_power(self):
         v = self.verdicts(0.12, 0.22)
