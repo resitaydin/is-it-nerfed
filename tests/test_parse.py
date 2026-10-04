@@ -41,7 +41,8 @@ class ParseSessionTest(unittest.TestCase):
         self.assertEqual(self.basic.tool_results, 2)
         self.assertEqual(self.basic.user_modified_edits, 1)
         self.assertEqual(self.basic.compactions, 1)
-        self.assertRegex(self.basic.claude_md_hash, r"^[0-9a-f]{12}$")
+        self.assertEqual(sorted(self.basic.claude_md_files), ["/x/CLAUDE.md", "/y/CLAUDE.md"])
+        self.assertRegex(self.basic.claude_md_files["/x/CLAUDE.md"], r"^[0-9a-f]{12}$")
 
     def test_context_fields(self):
         first, second, third = self.basic.prompts

@@ -26,7 +26,7 @@ BOOT_RESAMPLES = 5000
 
 @dataclass
 class Analysis:
-    status: str  # "ok" | "too_early" | "judge_drift" | "no_model"
+    status: str  # "ok" | "too_early" | "judge_drift" | "no_model" | "no_labels"
     model: Optional[str] = None
     prev_model: Optional[str] = None
     base: Optional[Window] = None
@@ -105,6 +105,14 @@ def session_counts(sessions: List[parse.Session], model: str, window: Window,
     return counts
 
 
+def _claude_md_edits(chosen: List[parse.Session]) -> int:
+    versions: Dict[str, set] = {}
+    for s in chosen:
+        for path, digest in s.claude_md_files.items():
+            versions.setdefault(path, set()).add(digest)
+    return sum(len(v) - 1 for v in versions.values())
+
+
 def side_changes(sessions: List[parse.Session], model: str, window: Window) -> dict:
     prompts = [p for p in _model_prompts(sessions, model) if _in(p.timestamp.date(), window)]
     ids = {p.session_id for p in prompts}
@@ -113,7 +121,7 @@ def side_changes(sessions: List[parse.Session], model: str, window: Window) -> d
     results = sum(s.tool_results for s in chosen)
     shares = Counter(p.project for p in prompts).most_common(3)
     return {
-        "claude_md_hashes": len({s.claude_md_hash for s in chosen if s.claude_md_hash}),
+        "claude_md_edits": _claude_md_edits(chosen),
         "cli_versions": sorted({p.cli_version for p in prompts if p.cli_version}),
         "median_prompt_chars": int(statistics.median(len(p.text) for p in prompts)) if prompts else 0,
         "top_projects": [(name, n / n_prompts) for name, n in shares],
@@ -233,12 +241,15 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     out.status = "judge_drift" if drift else "ok"
     base_counts, saved = _base_counts(sessions, model, base, labels, baselines)
     recent_counts = session_counts(sessions, model, recent, labels)
-    if drift or len(days) < FREEZE_DAYS:
+    no_labels = not sum(c[2] for c in base_counts) or not sum(c[2] for c in recent_counts)
+    if no_labels and not drift:
+        out.status = "no_labels"
+    if out.status != "ok" or len(days) < FREEZE_DAYS:
         saved = baselines
     out.base, out.recent = base, recent
     out.boot = _boot(base_counts, recent_counts)
-    out.verdict = "" if drift else stats.verdict(out.boot)
-    if not drift:
+    out.verdict = "" if out.status != "ok" else stats.verdict(out.boot)
+    if out.status == "ok":
         out.shared_verdict = _shared_verdict(sessions, base_counts, recent_counts, out.verdict)
     out.prev_model = previous_model(sessions, model)
     if out.prev_model:

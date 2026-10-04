@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 INTERRUPT_PREFIX = "[Request interrupted by user"
 SYSTEM_PREFIXES = (
@@ -42,7 +42,7 @@ class Session:
     session_id: str
     project: str
     prompts: List[Prompt] = field(default_factory=list)
-    claude_md_hash: Optional[str] = None
+    claude_md_files: Dict[str, str] = field(default_factory=dict)
     cli_versions: List[str] = field(default_factory=list)
     tool_results: int = 0
     tool_errors: int = 0
@@ -97,8 +97,8 @@ def parse_session(path: Path) -> Session:
             _read_assistant(line, session, state)
         elif kind == "system" and line.get("subtype") == "compact_boundary":
             session.compactions += 1
-        elif kind == "attachment" and session.claude_md_hash is None:
-            session.claude_md_hash = _instructions_hash(line.get("attachment"))
+        elif kind == "attachment" and not session.claude_md_files:
+            session.claude_md_files = _claude_md_files(line.get("attachment"))
     if any(OWN_COMMAND in p.text for p in session.prompts):
         session.is_own = True
     return session
@@ -185,12 +185,14 @@ def _user_text(content: Any) -> Optional[str]:
     return None
 
 
-def _instructions_hash(attachment: Any) -> Optional[str]:
+def _claude_md_files(attachment: Any) -> Dict[str, str]:
     if not isinstance(attachment, dict) or attachment.get("type") != "instructions":
-        return None
-    files = attachment.get("files") or []
-    joined = "\n".join(f.get("content", "") for f in files if isinstance(f, dict))
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:12]
+        return {}
+    files = [f for f in attachment.get("files") or [] if isinstance(f, dict)]
+    return {
+        f["path"]: hashlib.sha256(f.get("content", "").encode("utf-8")).hexdigest()[:12]
+        for f in files if str(f.get("path", "")).lower().endswith("claude.md")
+    }
 
 
 def _parse_time(value: str) -> datetime:

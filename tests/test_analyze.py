@@ -100,12 +100,37 @@ class HelperTests(unittest.TestCase):
         self.assertIn("Degraded performance on Opus", lines[1])
 
 
+class SideChangeTests(unittest.TestCase):
+    def edits(self, files_per_session):
+        sessions = []
+        for i, files in enumerate(files_per_session):
+            s = make_session("e%d" % i, day_n(i), OPUS5)
+            s.claude_md_files = files
+            sessions.append(s)
+        return analyze.side_changes(sessions, OPUS5, (day_n(0), day_n(9)))["claude_md_edits"]
+
+    def test_separate_projects_are_not_edits(self):
+        self.assertEqual(self.edits([{"/a/CLAUDE.md": "h1"}, {"/b/CLAUDE.md": "h2"}]), 0)
+
+    def test_three_versions_of_one_path_are_two_edits(self):
+        self.assertEqual(self.edits([{"/a/CLAUDE.md": "h1"}, {"/a/CLAUDE.md": "h2"},
+                                     {"/a/CLAUDE.md": "h3"}, {"/a/CLAUDE.md": "h3"}]), 2)
+
+
 class RunTests(unittest.TestCase):
     def test_no_model(self):
         old = days_sessions(5, start=date(2026, 6, 1))
         analysis, _ = run(old, {}, model=None)
         self.assertEqual(analysis.status, "no_model")
         self.assertIsNone(analysis.model)
+
+    def test_no_labels_status(self):
+        sessions = days_sessions(30)
+        analysis, saved = run(sessions, {})
+        self.assertEqual(analysis.status, "no_labels")
+        self.assertEqual(analysis.verdict, "")
+        self.assertEqual(analysis.boot.n_recent, 0)
+        self.assertEqual(saved, {})
 
     def test_too_early_status(self):
         sessions = days_sessions(2, start=date(2026, 10, 1))
