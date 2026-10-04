@@ -172,6 +172,20 @@ class RunTests(unittest.TestCase):
         self.assertIsNotNone(analysis.compare)
         self.assertIn("recent", analysis.side)
 
+    def test_firm_worse_needs_a_behavior_signal(self):
+        sessions = days_sessions(20, n=8)
+        labels = labels_for(sessions, lambda d: d >= day_n(10))
+        alone, _ = run(sessions, labels)
+        self.assertEqual(alone.signals, [])
+        self.assertEqual(alone.verdict, "unconfirmed_worse")
+        for s in sessions:
+            when = s.prompts[0].timestamp
+            late = when.date() >= day_n(10)
+            s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["interrupt"] * (6 if late else 1)]
+        confirmed, _ = run(sessions, labels)
+        self.assertIn(confirmed.verdict, ("slightly_worse", "clearly_worse"))
+        self.assertTrue(confirmed.signals[0].lo > 1)
+
     def test_compare_needs_ok_status_and_labels_on_both_sides(self):
         prev = days_sessions(6, OPUS4, start=date(2026, 6, 1))
         cur = days_sessions(10, OPUS5, start=date(2026, 9, 20))

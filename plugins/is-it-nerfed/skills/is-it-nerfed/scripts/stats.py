@@ -10,6 +10,14 @@ from typing import List, Optional, Tuple
 Window = Tuple[date, date]
 SessionCount = Tuple[str, int, int]  # session_id, model-caused steering count, labeled count
 MIN_SESSIONS = 5  # labeled sessions per side below which only a leaning verdict is given
+SESOI_RATIO = 1.5  # smallest rate ratio that matters
+FLOOR = 1.5  # smallest absolute change that matters, in percentage points
+CLEAR_RATIO = 2.0
+LEAN = 0.8  # bootstrap share on one side needed for a leaning verdict
+
+
+def in_window(day: date, window: Window) -> bool:
+    return window[0] <= day <= window[1]
 
 
 def make_windows(days: List[date]) -> Optional[Tuple[Window, Window]]:
@@ -37,11 +45,19 @@ class BootResult:
     n_recent: int
     s_base: int
     s_recent: int
+    ratio: float
+    ratio_lo: float
+    ratio_hi: float
 
 
-def _rate(counts: List[SessionCount]) -> float:
+def rate(counts: List[SessionCount]) -> float:
     total = sum(c[2] for c in counts)
     return 100.0 * sum(c[1] for c in counts) / total if total else 0.0
+
+
+def _ratio(hits_base: int, n_base: int, hits_recent: int, n_recent: int) -> float:
+    """Recent rate over base rate, with half a hit added to each side so zero counts stay finite."""
+    return ((hits_recent + 0.5) / (n_recent + 1)) / ((hits_base + 0.5) / (n_base + 1))
 
 
 def _binomial_cdf(k: int, n: int) -> List[float]:
@@ -62,43 +78,66 @@ def cluster_bootstrap(base: List[SessionCount], recent: List[SessionCount],
     """
     rng = random.Random(seed)
     sides = [[(c[2], _binomial_cdf(c[1], c[2])) for c in side if c[2] > 0] for side in (base, recent)]
-    diffs = []
+    diffs, ratios = [], []
     for _ in range(n):
-        rates = []
+        drawn = []
         for side in sides:
             pick = rng.choices(side, k=len(side))
             total = sum(m for m, _ in pick)
             hits = sum(min(m, bisect.bisect_right(cdf, rng.random())) for m, cdf in pick)
-            rates.append(100.0 * hits / total if total else 0.0)
-        diffs.append(rates[1] - rates[0])
+            drawn.append((hits, total))
+        (hb, nb), (hr, nr) = drawn
+        diffs.append((100.0 * hr / nr if nr else 0.0) - (100.0 * hb / nb if nb else 0.0))
+        ratios.append(_ratio(hb, nb, hr, nr))
     diffs.sort()
+    ratios.sort()
+    totals = [(sum(c[1] for c in side), sum(c[2] for c in side)) for side in (base, recent)]
     return BootResult(
-        diff=_rate(recent) - _rate(base),
+        diff=rate(recent) - rate(base),
         lo=diffs[int(0.05 * n)],
         hi=diffs[min(n - 1, int(0.95 * n))],
         p_worse=sum(d > 0 for d in diffs) / n,
-        base_rate=_rate(base),
-        recent_rate=_rate(recent),
+        base_rate=rate(base),
+        recent_rate=rate(recent),
         n_base=sum(c[2] for c in base),
         n_recent=sum(c[2] for c in recent),
         s_base=len(sides[0]),
         s_recent=len(sides[1]),
+        ratio=_ratio(*totals[0], *totals[1]),
+        ratio_lo=ratios[int(0.05 * n)],
+        ratio_hi=ratios[min(n - 1, int(0.95 * n))],
     )
 
 
-def verdict(r: BootResult, sesoi: float = 5.0) -> str:
+def ratio_bootstrap(base: List[SessionCount], recent: List[SessionCount],
+                    n: int = 2000, seed: int = 0) -> Tuple[float, float, float]:
+    """Rate ratio with a 90% interval from resampling sessions only, for counts with no upper bound."""
+    rng = random.Random(seed)
+
+    def totals(side: List[SessionCount]) -> Tuple[int, int]:
+        return sum(c[1] for c in side), sum(c[2] for c in side)
+
+    ratios = sorted(_ratio(*totals(rng.choices(base, k=len(base))), *totals(rng.choices(recent, k=len(recent))))
+                    for _ in range(n))
+    return _ratio(*totals(base), *totals(recent)), ratios[int(0.05 * n)], ratios[min(n - 1, int(0.95 * n))]
+
+
+def verdict(r: BootResult) -> str:
+    """Rate-ratio verdict: a rare event that doubles is a real change, whatever its size in points."""
     if min(r.s_base, r.s_recent) < MIN_SESSIONS:
         return _leaning(r)
-    if r.lo >= -sesoi and r.hi <= sesoi:
+    if (r.ratio_lo >= 1 / SESOI_RATIO and r.ratio_hi <= SESOI_RATIO) or (r.lo >= -FLOOR and r.hi <= FLOOR):
         return "no_change"
-    if r.lo > 0 and r.diff >= 2 * sesoi:
-        return "clearly_worse"
-    if r.lo > 0:
-        return "slightly_worse"
-    if r.hi < 0:
+    if r.ratio_lo > 1 and r.diff >= FLOOR:
+        return "clearly_worse" if r.ratio >= CLEAR_RATIO else "slightly_worse"
+    if r.ratio_hi < 1 and r.diff <= -FLOOR:
         return "better"
     return _leaning(r)
 
 
 def _leaning(r: BootResult) -> str:
-    return "leaning_worse" if r.p_worse >= 0.5 else "leaning_better"
+    if r.p_worse >= LEAN:
+        return "leaning_worse"
+    if r.p_worse <= 1 - LEAN:
+        return "leaning_better"
+    return "unclear"

@@ -1,4 +1,4 @@
-"""Turn an Analysis into the 5-line terminal summary and one self-contained HTML report."""
+"""Turn an Analysis into the terminal summary and one self-contained HTML report."""
 from __future__ import annotations
 
 import math
@@ -10,6 +10,7 @@ from string import Template
 from typing import Dict, List, Optional, Tuple
 
 from analyze import Analysis
+from signals import SignalResult
 from stats import BootResult, Window
 
 VERDICT_TEXT: Dict[str, str] = {
@@ -19,8 +20,11 @@ VERDICT_TEXT: Dict[str, str] = {
     "better": "better",
     "leaning_worse": "probably worse",
     "leaning_better": "probably better",
+    "unclear": "no clear change",
+    "unconfirmed_worse": "probably worse, but agent behavior did not change",
 }
-WORSE = {"slightly_worse", "clearly_worse", "leaning_worse"}
+WORSE = {"slightly_worse", "clearly_worse", "leaning_worse", "unconfirmed_worse"}
+INTERVAL_VERDICTS = {"no_change", "unclear"}
 STATUS_TEXT: Dict[str, str] = {
     "too_early": "too early: fewer than 3 active days, no verdict yet",
     "judge_drift": "no verdict: the judge matched only %s of the anchor labels (it needs 80%%)",
@@ -65,9 +69,17 @@ def _pts(x: float) -> str:
     return "%+d pts" % int(round(x))
 
 
+def _times(ratio: float) -> str:
+    return "×%.1f" % ratio
+
+
+def _times_interval(ratio: float, lo: float, hi: float) -> str:
+    return "%s (%s to %s)" % (_times(ratio), _times(lo), _times(hi))
+
+
 def probability(verdict: str, boot: BootResult) -> str:
-    if verdict == "no_change":
-        return "90% interval inside ±5 pts"
+    if verdict in INTERVAL_VERDICTS:
+        return "90%% interval %s to %s" % (_times(boot.ratio_lo), _times(boot.ratio_hi))
     p = boot.p_worse if verdict in WORSE else 1 - boot.p_worse
     return "%.0f%% probability" % (100 * p)
 
@@ -130,6 +142,15 @@ def _side_line(side: Dict[str, dict]) -> str:
     return "Your side: " + (", ".join(parts) if parts else "no change found")
 
 
+def _moved(results: List[SignalResult]) -> List[SignalResult]:
+    return [r for r in results if r.lo > 1 or r.hi < 1]
+
+
+def _behavior_line(a: Analysis) -> str:
+    moved = ", ".join("%s %s" % (r.signal.name, _times(r.ratio)) for r in _moved(a.signals))
+    return "Agent behavior: " + (moved or "no change found")
+
+
 def _harness_line(a: Analysis) -> str:
     if not a.overlay_ok:
         return "Harness: changelog not available: offline"
@@ -150,8 +171,9 @@ def summary(a: Analysis, report_path: Path) -> List[str]:
     b = a.boot
     return [
         "%s — %s (%s)" % (name, VERDICT_TEXT[a.verdict], probability(a.verdict, b)),
-        "Model-caused steering: %s → %s (%s), %s vs %s" % (
-            _pct(b.base_rate), _pct(b.recent_rate), _pts(b.diff), span(a.base), span(a.recent)),
+        "Model-caused steering: %s → %s (%s, %s), %s vs %s" % (
+            _pct(b.base_rate), _pct(b.recent_rate), _times(b.ratio), _pts(b.diff), span(a.base), span(a.recent)),
+        _behavior_line(a),
         _side_line(a.side),
         _harness_line(a),
         last,
@@ -256,10 +278,10 @@ def _hero(a: Analysis) -> str:
     head = "%s shows no change" % name if a.verdict == "no_change" else "%s is %s" % (
         name, VERDICT_TEXT[a.verdict])
     out = ['<h1>%s</h1>' % head,
-           '<p class="lead">Model-caused steering went from %s to %s of your labeled prompts (%s): '
-           '%s, 90%% interval %+.0f to %+.0f pts.</p>'
-           % (_pct(b.base_rate), _pct(b.recent_rate), _pts(b.diff),
-              probability(a.verdict, b), b.lo, b.hi),
+           '<p class="lead">Model-caused steering went from %s to %s of your labeled prompts: '
+           '%s, 90%% interval %s to %s (%s).</p>'
+           % (_pct(b.base_rate), _pct(b.recent_rate), _times(b.ratio),
+              _times(b.ratio_lo), _times(b.ratio_hi), _pts(b.diff)),
            '<p class="meta">First days %s, %d prompts. Recent %s, %d prompts.</p>'
            % (span(a.base), b.n_base, span(a.recent), b.n_recent)]
     if a.shared_verdict:
@@ -293,6 +315,18 @@ def _chart_section(a: Analysis) -> str:
         % (chart_svg(a.daily, a.markers), marks, rows))
 
 
+def _behavior_section(a: Analysis) -> str:
+    if not a.signals:
+        return ""
+    rows = "".join('<tr><th scope="row">%s</th><td>%.1f</td><td>%.1f</td><td>%s</td></tr>'
+                   % (escape(r.signal.label), r.base_rate, r.recent_rate, _times_interval(r.ratio, r.lo, r.hi))
+                   for r in a.signals)
+    return ('<section><h2>Agent behavior</h2>'
+            '<p class="meta">These counts need no judge. A firm "worse" verdict needs one of them to rise too.</p>'
+            '<table class="side"><thead><tr><th></th><th>First days</th><th>Recent</th>'
+            '<th>Change, 90%% interval</th></tr></thead><tbody>%s</tbody></table></section>' % rows)
+
+
 def _compare_section(a: Analysis) -> str:
     if a.compare is None:
         return ""
@@ -316,7 +350,6 @@ SIDE_ROWS = [
     ("Median prompt length", lambda s, short: "%d characters" % s["median_prompt_chars"]),
     ("Project mix", lambda s, short: _projects(s["top_projects"], short)),
     ("Compactions per session", lambda s, short: "%.1f" % s["compactions_per_session"]),
-    ("Interrupts per 100 prompts", lambda s, short: "%.1f" % (100 * s["interrupts_per_prompt"])),
     ("Tool error rate", lambda s, short: "%.1f%%" % (100 * s["tool_error_rate"])),
     ("Your edits to agent edits", lambda s, short: str(s["user_edits"])),
     ("Output tokens per prompt", lambda s, short: "{:,.0f}".format(s["output_tokens_per_prompt"])),
@@ -379,6 +412,7 @@ def render(a: Analysis) -> str:
         title=escape("Is it nerfed? " + model_name(a.model)),
         hero=_hero(a),
         chart=_chart_section(a),
+        behavior=_behavior_section(a),
         compare=_compare_section(a),
         side=_side_section(a),
         harness=_harness_section(a),

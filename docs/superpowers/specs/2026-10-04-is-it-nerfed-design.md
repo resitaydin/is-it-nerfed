@@ -38,7 +38,7 @@ The tool costs the author nothing. All LLM work runs on the user's own Claude Co
 4. Claude asks: "N prompts need a label. This uses about X tokens from your plan. Continue?"
 5. On yes, Claude runs Sonnet subagents that label the batches. On 200 real prompts, Haiku
    reached kappa 0.54 (steering) and 0.20 (cause); Sonnet reached 0.85 and 0.62.
-6. The script calculates the verdict, prints a 5-line summary, and writes one HTML report.
+6. The script calculates the verdict, prints a short summary, and writes one HTML report.
 
 Terminal example:
 
@@ -148,27 +148,42 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 
 - Primary metric: model-caused steering rate = prompts with `kind = steering` and
   `cause = model`, divided by labeled prompts.
-- Diagnostics (not in the verdict): total steering rate, interrupts per prompt, tool error rate,
+- Diagnostics (not in the verdict): total steering rate, tool error rate,
   user edits to agent edits, output tokens per prompt.
+- Agent-behavior signals (no judge, all sessions of the model in each window), pre-declared from
+  the March 2026 regression ([claude-code#42796](https://github.com/anthropics/claude-code/issues/42796)):
+  - Blind edits: `Edit`/`MultiEdit` calls on a file that no earlier tool call in the session named,
+    as a share of edits.
+  - Interrupts per 1,000 tool calls.
+  - Self-corrections ("oh wait", "I was wrong", and similar) per 1,000 tool calls.
+
+  Each signal gets a rate ratio and a 90% interval from 2,000 session resamples. A signal
+  "rises" when the interval lies above 1. The read:edit ratio is left out: most reads go through
+  Bash in auto mode, so it measures the workflow, not the model.
 - Windows: if the model has fewer than 28 active days, split its active days into a first and a
   second half. Otherwise, the first 14 days against the last 14 days. When the model first reaches 28 active days, the baseline result
   is saved to `cache/baselines.json` and reused.
 - Uncertainty: 5,000 two-stage cluster-bootstrap resamples per window. Stage 1 resamples the
   labeled sessions with replacement. Stage 2 draws the model-caused count of each picked session
   from a binomial with that session's size and rate. Output: the difference (recent minus
-  baseline), a 90% interval, and P(worse) = share of resamples > 0.
-- Verdict, with SESOI = 5 points:
+  baseline), the rate ratio (recent over baseline, half a hit added to each side), 90% intervals
+  for both, and P(worse) = share of resamples with a difference > 0.
+- Verdict on the rate ratio, because model-caused steering is rare (about 3.5% of prompts) and a
+  doubling is only a few points. SESOI = ratio 1.5, with an absolute floor of 1.5 points:
 
 | Verdict | Condition |
 |---|---|
-| No change | The 90% interval lies inside ±5 points. |
-| Clearly worse | The interval lies above 0 and the estimate is 10 points or more. |
-| Slightly worse | The interval lies above 0. |
-| Better | The interval lies below 0. |
-| Leaning worse / leaning better | Any other case. Show P(worse) or P(better). |
+| No change | The ratio interval lies inside ×0.67 to ×1.5, or the difference interval inside ±1.5 points. |
+| Clearly worse | The ratio interval lies above 1, the difference is 1.5 points or more, and the ratio is 2 or more. |
+| Slightly worse | The ratio interval lies above 1 and the difference is 1.5 points or more. |
+| Better | The ratio interval lies below 1 and the difference is −1.5 points or less. |
+| Leaning worse / leaning better | P(worse) ≥ 80% or ≤ 20%. Show P(worse) or P(better). |
+| Unclear ("no clear change") | Any other case. Show the ratio interval. |
 
+- Confirmation: a firm "worse" needs at least one agent-behavior signal to rise. Otherwise the
+  verdict is "probably worse, but agent behavior did not change".
 - Minimum data: a firm verdict needs at least 5 labeled sessions on each side. Below that,
-  the verdict is at most "leaning worse" or "leaning better".
+  the verdict is at most leaning or unclear.
 
 - Project-mix check: repeat the calculation on prompts from projects that appear in both
   windows. If the verdict differs, the report says "your project mix changed" and shows both.
@@ -179,17 +194,18 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 
 ## 6. Report
 
-Terminal: the 5-line summary from section 2.
+Terminal: the summary from section 2, plus one "Agent behavior" line after the steering line.
 
 HTML (one self-contained file, no external requests):
 1. Verdict and probability.
 2. Chart: faint daily dots, a 5-day rolling line with a band, markers for CLI versions and
    incidents.
-3. Model against model.
-4. "Is it you?" panel: CLAUDE.md edits, CLI versions, median prompt length, project mix,
+3. Agent behavior: each signal per window, with its ratio and interval.
+4. Model against model.
+5. "Is it you?" panel: CLAUDE.md edits, CLI versions, median prompt length, project mix,
    compaction count.
-5. Harness changes: changelog lines marked `affects_behavior: yes`.
-6. Evidence receipts: the 3 worst model-caused moments per window, with quotes and reasons.
+6. Harness changes: changelog lines marked `affects_behavior: yes`.
+7. Evidence receipts: the 3 worst model-caused moments per window, with quotes and reasons.
 
 The report stays local. It contains the user's own words.
 
@@ -206,8 +222,8 @@ The report stays local. It contains the user's own words.
 | Layer | Check | When |
 |---|---|---|
 | Unit tests | Synthetic JSONL fixtures: duplicate `message.id`, `<synthetic>`, sidechains, interrupts, own-session exclusion, CLAUDE.md hash. | Every commit |
-| A/A test | Random session split on fixture data, 200 runs: false "worse" verdicts ≤ 8%, false "better" ≤ 8%. | Every commit |
-| Planted-nerf test | Add +10 points of model-caused steering to the recent window: "worse" verdicts ≥ 80%. | Every commit |
+| A/A test | Synthetic sessions at a 3.5% base rate (and 12%), 200 runs: false "worse" ≤ 8%, false "better" ≤ 8%, leaning verdicts ≤ 45%. | Every commit |
+| Planted-nerf test | Double the rate (3.5% → 7%) with 100 sessions per side: "worse" verdicts ≥ 70%, "no change" ≤ 5%. | Every commit |
 | Judge eval | `eval/` harness: precision, recall, kappa on the author's private labeled set (~200 prompts, git-ignored). Target kappa ≥ 0.7. | Before release, and on every `judge-prompt.md` change |
 
 ## 9. Repo layout

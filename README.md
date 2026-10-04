@@ -22,11 +22,12 @@ In any Claude Code session, type:
 ```
 
 Claude shows how many prompts need a label and the token cost, and asks before it starts.
-The result has 5 lines, for example:
+The result has 6 lines, for example:
 
 ```
 Opus 5.5 — slightly worse (78% probability)
-Model-caused steering: 9% → 15% (+6 pts), Sep 24–28 vs Sep 30–Oct 4
+Model-caused steering: 9% → 15% (×1.7, +6 pts), Sep 24–28 vs Sep 30–Oct 4
+Agent behavior: interrupts ×3.2
 Your side: CLAUDE.md changed 2×, CLI 2.1.271 → 2.1.289
 Harness: 2.1.285 changed default effort (possible cause)
 Report: ~/.claude/is-it-nerfed/report-2026-10-04.html

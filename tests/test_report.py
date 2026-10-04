@@ -8,6 +8,7 @@ from pathlib import Path
 
 import report
 from analyze import Analysis
+from signals import SIGNALS, SignalResult
 from stats import BootResult
 
 START = date(2026, 9, 7)
@@ -26,7 +27,7 @@ def _daily():
 
 def _side(edits, versions, top, chars):
     return {"claude_md_edits": edits, "cli_versions": versions, "median_prompt_chars": chars,
-            "top_projects": top, "compactions_per_session": 0.4, "interrupts_per_prompt": 0.05,
+            "top_projects": top, "compactions_per_session": 0.4,
             "tool_error_rate": 0.031, "user_edits": 6, "output_tokens_per_prompt": 1840.0}
 
 
@@ -37,10 +38,12 @@ def fixture(status: str = "ok") -> Analysis:
         status=status, model="claude-opus-5-5", prev_model="claude-opus-5-4",
         base=base, recent=recent,
         boot=BootResult(diff=6.2, lo=1.1, hi=11.0, p_worse=0.78, base_rate=9.1, recent_rate=15.3,
-                        n_base=160, n_recent=170, s_base=24, s_recent=26),
+                        n_base=160, n_recent=170, s_base=24, s_recent=26,
+                        ratio=1.7, ratio_lo=1.1, ratio_hi=2.6),
         verdict="slightly_worse", shared_verdict="leaning_worse",
         compare=BootResult(diff=-1.0, lo=-6.0, hi=4.0, p_worse=0.35, base_rate=16.3, recent_rate=15.3,
-                           n_base=140, n_recent=170, s_base=22, s_recent=26),
+                           n_base=140, n_recent=170, s_base=22, s_recent=26,
+                           ratio=0.94, ratio_lo=0.6, ratio_hi=1.3),
         compare_verdict="leaning_better",
         daily=_daily(),
         markers=[(START + timedelta(days=9), "version", "2.1.280"),
@@ -62,6 +65,8 @@ def fixture(status: str = "ok") -> Analysis:
                               "reason": "The agent edited an unrelated file."}]},
         attribution=["CLI 2.1.285 started in the recent window: Changed the default effort to medium"],
         judge_agreement=0.93, overlay_ok=True,
+        signals=[SignalResult(SIGNALS[0], 8.0, 9.1, 1.1, 0.7, 1.6),
+                 SignalResult(SIGNALS[1], 1.2, 3.9, 3.2, 1.8, 5.5)],
     )
 
 
@@ -74,11 +79,12 @@ REPORT = Path("/data/report-2026-10-04.html")
 
 
 class SummaryTest(unittest.TestCase):
-    def test_summary_five_lines_ok(self):
+    def test_summary_lines_ok(self):
         lines = report.summary(fixture(), REPORT)
         self.assertEqual(lines, [
             "Opus 5.5 — slightly worse (78% probability)",
-            "Model-caused steering: 9% → 15% (+6 pts), Sep 7–20 vs Sep 21–Oct 4",
+            "Model-caused steering: 9% → 15% (×1.7, +6 pts), Sep 7–20 vs Sep 21–Oct 4",
+            "Agent behavior: interrupts ×3.2",
             "Your side: CLAUDE.md changed 2×, CLI 2.1.271 → 2.1.289, "
             "top project ai-team-journey-analyzer → is-it-nerfed",
             "Harness: CLI 2.1.285 started in the recent window: Changed the default effort to medium",
@@ -90,18 +96,24 @@ class SummaryTest(unittest.TestCase):
         a.verdict = "leaning_better"
         self.assertEqual(report.summary(a, REPORT)[0], "Opus 5.5 — probably better (22% probability)")
         a.verdict = "no_change"
+        self.assertEqual(report.summary(a, REPORT)[0], "Opus 5.5 — no change (90% interval ×1.1 to ×2.6)")
+        a.verdict = "unclear"
+        self.assertEqual(report.summary(a, REPORT)[0], "Opus 5.5 — no clear change (90% interval ×1.1 to ×2.6)")
+        a.verdict = "unconfirmed_worse"
         self.assertEqual(report.summary(a, REPORT)[0],
-                         "Opus 5.5 — no change (90% interval inside ±5 pts)")
+                         "Opus 5.5 — probably worse, but agent behavior did not change (78% probability)")
+        a.signals = []
+        self.assertEqual(report.summary(a, REPORT)[2], "Agent behavior: no change found")
 
     def test_summary_no_side_change_and_offline(self):
         a = fixture()
         a.side["recent"] = dict(a.side["base"])
         a.overlay_ok = False
         lines = report.summary(a, REPORT)
-        self.assertEqual(lines[2], "Your side: no change found")
-        self.assertEqual(lines[3], "Harness: changelog not available: offline")
+        self.assertEqual(lines[3], "Your side: no change found")
+        self.assertEqual(lines[4], "Harness: changelog not available: offline")
         a.overlay_ok, a.attribution = True, []
-        self.assertEqual(report.summary(a, REPORT)[3], "Harness: no known change")
+        self.assertEqual(report.summary(a, REPORT)[4], "Harness: no known change")
 
     def test_summary_too_early(self):
         lines = report.summary(too_early(), REPORT)
@@ -163,7 +175,7 @@ class RenderTest(unittest.TestCase):
 
     def test_render_sections_in_order(self):
         out = report.render(fixture())
-        heads = ["Model-caused steering by day", "Model against model", "Is it you?",
+        heads = ["Model-caused steering by day", "Agent behavior", "Model against model", "Is it you?",
                  "Harness changes", "Evidence"]
         positions = [out.index(h) for h in heads]
         self.assertEqual(positions, sorted(positions))
@@ -171,6 +183,8 @@ class RenderTest(unittest.TestCase):
         self.assertIn("less controlled: different weeks", out)
         self.assertIn("Changed the default effort to medium", out)
         self.assertNotIn("Fixed a typo in /help", out)
+        self.assertIn("Interrupts per 1,000 tool calls", out)
+        self.assertIn("×3.2 (×1.8 to ×5.5)", out)
 
     def test_render_offline_and_no_compare(self):
         a = fixture()

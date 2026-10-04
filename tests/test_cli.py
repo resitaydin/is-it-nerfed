@@ -92,7 +92,7 @@ class CliTest(unittest.TestCase):
         self.write_labels(scan)
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.strip().splitlines()), 5)
+        self.assertEqual(len(result.stdout.strip().splitlines()), 6)
         self.assertTrue((self.data / ("report-%s.html" % TODAY)).exists())
         self.assertTrue((self.data / "cache" / "labels.jsonl").exists())
         self.assertTrue((self.data / "cache" / "baselines.json").exists())

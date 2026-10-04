@@ -7,7 +7,7 @@ import stats
 from tests.synth import make_counts
 
 WORSE = ("slightly_worse", "clearly_worse")
-LEANING = ("leaning_worse", "leaning_better")
+LEANING = ("leaning_worse", "leaning_better", "unclear")
 
 
 def days(n):
@@ -15,8 +15,9 @@ def days(n):
     return [start + timedelta(days=i) for i in range(n)]
 
 
-def result(lo, hi, diff=0.0, p_worse=0.5, sessions=10):
-    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 100, 100, sessions, sessions)
+def result(lo, hi, diff=0.0, p_worse=0.5, sessions=10, ratio=1.0, ratio_lo=0.5, ratio_hi=2.0):
+    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 100, 100, sessions, sessions,
+                            ratio, ratio_lo, ratio_hi)
 
 
 class WindowsTest(unittest.TestCase):
@@ -53,6 +54,17 @@ class BootstrapTest(unittest.TestCase):
         r = stats.cluster_bootstrap([("a", 0, 0), ("b", 1, 4)], [("c", 1, 2), ("d", 0, 3)], n=50)
         self.assertEqual((r.s_base, r.s_recent), (1, 2))
 
+    def test_rate_ratio(self):
+        r = stats.cluster_bootstrap(make_counts(40, 8, 0.05, 1), make_counts(40, 8, 0.15, 2), n=1000)
+        self.assertAlmostEqual(r.ratio, r.recent_rate / r.base_rate, delta=0.1)
+        self.assertLess(r.ratio_lo, r.ratio)
+        self.assertGreater(r.ratio_hi, r.ratio)
+
+    def test_rate_ratio_with_zero_base(self):
+        r = stats.cluster_bootstrap([("a", 0, 10)], [("b", 2, 10)], n=200)
+        self.assertGreater(r.ratio, 1)
+        self.assertLess(r.ratio, float("inf"))
+
     def test_one_session_per_side_resamples_prompts(self):
         r = stats.cluster_bootstrap([("a", 1, 10)], [("b", 3, 10)], n=5000)
         self.assertEqual(r.diff, 20.0)
@@ -60,33 +72,60 @@ class BootstrapTest(unittest.TestCase):
         self.assertIn(stats.verdict(r), LEANING)
 
 
+class RatioBootstrapTest(unittest.TestCase):
+    def test_same_rate_interval_holds_one(self):
+        side = [("s%d" % i, 3, 100) for i in range(10)]
+        ratio, lo, hi = stats.ratio_bootstrap(side, side, n=500)
+        self.assertAlmostEqual(ratio, 1.0)
+        self.assertLessEqual(lo, 1)
+        self.assertGreaterEqual(hi, 1)
+
+    def test_higher_recent_rate(self):
+        base = [("b%d" % i, 1 + i % 2, 100) for i in range(10)]
+        recent = [("r%d" % i, 6 + i % 3, 100) for i in range(10)]
+        ratio, lo, hi = stats.ratio_bootstrap(base, recent, n=500)
+        self.assertGreater(lo, 1)
+        self.assertLess(lo, ratio)
+        self.assertGreater(hi, ratio)
+
+
 class VerdictTest(unittest.TestCase):
     def test_verdict_table(self):
         rows = [
-            (result(lo=1, hi=4), "no_change"),
-            (result(lo=-5, hi=5), "no_change"),
-            (result(lo=6, hi=20, diff=12), "clearly_worse"),
-            (result(lo=2, hi=20, diff=8), "slightly_worse"),
-            (result(lo=-20, hi=-6, diff=-12), "better"),
-            (result(lo=-8, hi=12, diff=2, p_worse=0.6), "leaning_worse"),
-            (result(lo=-12, hi=8, diff=-2, p_worse=0.4), "leaning_better"),
+            (result(lo=-3, hi=3, ratio_lo=0.8, ratio_hi=1.4), "no_change"),
+            (result(lo=-1, hi=1.4, ratio_lo=0.3, ratio_hi=3.0), "no_change"),
+            (result(lo=1, hi=7, diff=4, ratio=2.2, ratio_lo=1.2, ratio_hi=4), "clearly_worse"),
+            (result(lo=0.2, hi=4, diff=2, ratio=1.6, ratio_lo=1.1, ratio_hi=2.5), "slightly_worse"),
+            (result(lo=-6, hi=-1, diff=-3, ratio=0.4, ratio_lo=0.2, ratio_hi=0.8), "better"),
+            (result(lo=-2, hi=6, diff=2, p_worse=0.85, ratio=1.4, ratio_lo=0.7, ratio_hi=2.8), "leaning_worse"),
+            (result(lo=-6, hi=2, diff=-2, p_worse=0.15, ratio=0.7, ratio_lo=0.3, ratio_hi=1.4), "leaning_better"),
+            (result(lo=-3, hi=3, p_worse=0.6, ratio_lo=0.6, ratio_hi=1.7), "unclear"),
         ]
         for r, expected in rows:
             self.assertEqual(stats.verdict(r), expected, r)
 
+    def test_worse_needs_the_absolute_floor(self):
+        r = result(lo=0.1, hi=2, diff=1, p_worse=0.97, ratio=3.0, ratio_lo=1.2, ratio_hi=8)
+        self.assertEqual(stats.verdict(r), "leaning_worse")
+
     def test_few_sessions_give_only_leaning(self):
         few = stats.MIN_SESSIONS - 1
         rows = [
-            (result(lo=1, hi=4, p_worse=0.7, sessions=few), "leaning_worse"),
-            (result(lo=6, hi=20, diff=12, p_worse=1.0, sessions=few), "leaning_worse"),
-            (result(lo=-20, hi=-6, diff=-12, p_worse=0.0, sessions=few), "leaning_better"),
+            (result(lo=-1, hi=1, p_worse=0.85, sessions=few, ratio_lo=0.9, ratio_hi=1.1), "leaning_worse"),
+            (result(lo=-1, hi=1, p_worse=0.6, sessions=few, ratio_lo=0.9, ratio_hi=1.1), "unclear"),
+            (result(lo=6, hi=20, diff=12, p_worse=1.0, sessions=few, ratio=3, ratio_lo=2, ratio_hi=5),
+             "leaning_worse"),
+            (result(lo=-20, hi=-6, diff=-12, p_worse=0.0, sessions=few, ratio=0.3, ratio_lo=0.1,
+                    ratio_hi=0.6), "leaning_better"),
         ]
         for r, expected in rows:
             self.assertEqual(stats.verdict(r), expected, r)
 
 
 class CalibrationTest(unittest.TestCase):
-    def verdicts(self, base_rate, recent_rate, n_sessions=40, prompts_per=8):
+    """Model-caused steering is rare: about 3.5% of prompts in the judge eval set."""
+
+    def verdicts(self, base_rate, recent_rate, n_sessions=50, prompts_per=8):
         out = []
         for seed in range(200):
             base = make_counts(n_sessions, prompts_per, base_rate, seed * 2)
@@ -94,23 +133,37 @@ class CalibrationTest(unittest.TestCase):
             out.append(stats.verdict(stats.cluster_bootstrap(base, recent, n=1000, seed=seed)))
         return out
 
-    def assert_false_alarms(self, n_sessions, prompts_per):
-        v = self.verdicts(0.12, 0.12, n_sessions, prompts_per)
-        self.assertLessEqual(sum(x in WORSE for x in v) / 200, 0.08)
-        self.assertLessEqual(sum(x == "better" for x in v) / 200, 0.08)
+    def share(self, verdicts, names):
+        return sum(v in names for v in verdicts) / len(verdicts)
+
+    def assert_false_alarms(self, rate, n_sessions, prompts_per):
+        v = self.verdicts(rate, rate, n_sessions, prompts_per)
+        self.assertLessEqual(self.share(v, WORSE), 0.08)
+        self.assertLessEqual(self.share(v, ("better",)), 0.08)
 
     def test_aa_false_alarm_rate(self):
-        self.assert_false_alarms(40, 8)
+        self.assert_false_alarms(0.035, 50, 8)
+
+    def test_aa_false_alarm_rate_common_event(self):
+        self.assert_false_alarms(0.12, 40, 8)
 
     def test_aa_false_alarm_rate_3_sessions(self):
-        self.assert_false_alarms(3, 30)
+        self.assert_false_alarms(0.035, 3, 30)
 
     def test_aa_false_alarm_rate_5_sessions(self):
-        self.assert_false_alarms(5, 20)
+        self.assert_false_alarms(0.035, 5, 20)
+
+    def test_aa_rarely_leans(self):
+        v = self.verdicts(0.035, 0.035, n_sessions=100)
+        self.assertLessEqual(self.share(v, ("leaning_worse", "leaning_better")), 0.45)
+
+    def test_doubling_is_not_called_no_change(self):
+        v = self.verdicts(0.035, 0.07, n_sessions=100)
+        self.assertLessEqual(self.share(v, ("no_change",)), 0.05)
 
     def test_planted_nerf_power(self):
-        v = self.verdicts(0.12, 0.22)
-        self.assertGreaterEqual(sum(x in WORSE for x in v) / 200, 0.80)
+        v = self.verdicts(0.035, 0.07, n_sessions=100)
+        self.assertGreaterEqual(self.share(v, WORSE), 0.70)
 
 
 if __name__ == "__main__":

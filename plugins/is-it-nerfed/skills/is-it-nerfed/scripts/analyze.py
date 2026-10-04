@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import labels as labels_mod
 import overlay
 import parse
+import signals as signals_mod
 import stats
 from stats import BootResult, SessionCount, Window
 
@@ -22,6 +23,7 @@ DRIFT_THRESHOLD = 0.8
 CLAUDE_CODE = "Claude Code"
 CAUSE_WORDS = re.compile(r"degraded|performance", re.I)
 BOOT_RESAMPLES = 5000
+FIRM_WORSE = ("slightly_worse", "clearly_worse")
 
 
 @dataclass
@@ -44,6 +46,7 @@ class Analysis:
     attribution: List[str] = field(default_factory=list)
     judge_agreement: Optional[float] = None
     overlay_ok: bool = True
+    signals: List[signals_mod.SignalResult] = field(default_factory=list)
 
 
 def family(model: str) -> str:
@@ -52,10 +55,6 @@ def family(model: str) -> str:
 
 def _model_prompts(sessions: List[parse.Session], model: str) -> List[parse.Prompt]:
     return [p for s in sessions for p in s.prompts if p.model == model]
-
-
-def _in(day: date, window: Window) -> bool:
-    return window[0] <= day <= window[1]
 
 
 def current_model(sessions: List[parse.Session], today: date) -> Optional[str]:
@@ -99,7 +98,7 @@ def session_counts(sessions: List[parse.Session], model: str, window: Window,
     counts = []
     for s in sessions:
         mine = [labels[p.uuid] for p in s.prompts
-                if p.model == model and _in(p.timestamp.date(), window) and p.uuid in labels]
+                if p.model == model and stats.in_window(p.timestamp.date(), window) and p.uuid in labels]
         if mine:
             counts.append((s.session_id, sum(labels_mod.is_model_steering(l) for l in mine), len(mine)))
     return counts
@@ -119,7 +118,7 @@ def _claude_md_edits(chosen: List[parse.Session]) -> int:
 
 
 def side_changes(sessions: List[parse.Session], model: str, window: Window) -> dict:
-    prompts = [p for p in _model_prompts(sessions, model) if _in(p.timestamp.date(), window)]
+    prompts = [p for p in _model_prompts(sessions, model) if stats.in_window(p.timestamp.date(), window)]
     ids = {p.session_id for p in prompts}
     chosen = [s for s in sessions if s.session_id in ids]
     n_prompts = len(prompts) or 1
@@ -131,7 +130,6 @@ def side_changes(sessions: List[parse.Session], model: str, window: Window) -> d
         "median_prompt_chars": int(statistics.median(len(p.text) for p in prompts)) if prompts else 0,
         "top_projects": [(name, n / n_prompts) for name, n in shares],
         "compactions_per_session": sum(s.compactions for s in chosen) / (len(chosen) or 1),
-        "interrupts_per_prompt": sum(s.interrupts for s in chosen) / n_prompts,
         "tool_error_rate": sum(s.tool_errors for s in chosen) / results if results else 0.0,
         "user_edits": sum(s.user_modified_edits for s in chosen),
         "output_tokens_per_prompt": sum(s.output_tokens for s in chosen) / n_prompts,
@@ -155,7 +153,7 @@ def receipts(sessions: List[parse.Session], model: str, window: Window,
     by_session = []
     for s in sessions:
         hits = [(p, labels[p.uuid]) for p in s.prompts
-                if p.model == model and _in(p.timestamp.date(), window)
+                if p.model == model and stats.in_window(p.timestamp.date(), window)
                 and p.uuid in labels and labels_mod.is_model_steering(labels[p.uuid])]
         if hits:
             by_session.append((-len(hits), s.session_id, hits))
@@ -178,7 +176,7 @@ def attribution(recent: Window, harness: List[dict], version_dates: Dict[str, da
     lines = ["CLI %s started in the recent window: %s" % (h["version"], h["line"])
              for h in harness
              if h.get("affects_behavior") == "yes"
-             and h["version"] in version_dates and _in(version_dates[h["version"]], recent)]
+             and h["version"] in version_dates and stats.in_window(version_dates[h["version"]], recent)]
     lines += ["Incident in the recent window: %s" % i.name for i in incidents
               if _claude_code(i) and CAUSE_WORDS.search(i.name) and _overlaps(i, recent)]
     return lines
@@ -187,16 +185,16 @@ def attribution(recent: Window, harness: List[dict], version_dates: Dict[str, da
 def _harness(interp: Dict[str, dict], version_dates: Dict[str, date],
              windows: Tuple[Window, Window]) -> List[dict]:
     found = [r for r in interp.values() if r["version"] in version_dates
-             and any(_in(version_dates[r["version"]], w) for w in windows)]
+             and any(stats.in_window(version_dates[r["version"]], w) for w in windows)]
     return sorted(found, key=lambda r: (version_dates[r["version"]], r["id"]))
 
 
 def _markers(days: List[date], version_dates: Dict[str, date],
              incidents: List[overlay.Incident]) -> List[Tuple[date, str, str]]:
     span = (days[0], days[-1])
-    marks = [(d, "version", v) for v, d in version_dates.items() if _in(d, span)]
+    marks = [(d, "version", v) for v, d in version_dates.items() if stats.in_window(d, span)]
     marks += [(i.start.date(), "incident", i.name) for i in incidents
-              if _claude_code(i) and _in(i.start.date(), span)]
+              if _claude_code(i) and stats.in_window(i.start.date(), span)]
     return sorted(marks)
 
 
@@ -258,6 +256,9 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     out.base, out.recent = base, recent
     out.boot = _boot(base_counts, recent_counts)
     out.verdict = "" if out.status != "ok" else stats.verdict(out.boot)
+    out.signals = signals_mod.compare(sessions, model, base, recent)
+    if out.verdict in FIRM_WORSE and not signals_mod.confirms_worse(out.signals):
+        out.verdict = "unconfirmed_worse"
     if out.status == "ok":
         out.shared_verdict = _shared_verdict(sessions, base_counts, recent_counts, out.verdict)
     out.prev_model = previous_model(sessions, model)

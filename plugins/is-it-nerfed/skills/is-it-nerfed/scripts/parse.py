@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,10 @@ NOT_HUMAN_FLAGS = ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")
 OWN_COMMAND = "<command-name>/is-it-nerfed"
 OWN_DATA_DIR = "is-it-nerfed/work/"
 SYNTHETIC_MODEL = "<synthetic>"
+EDIT_TOOLS = ("Edit", "MultiEdit")
+SELF_CORRECTION = re.compile(
+    r"\b(?:oh wait|no wait|wait,|hmm,? actually|actually,? wait|let me reconsider|i was wrong|my mistake)",
+    re.I)
 
 
 @dataclass
@@ -41,6 +46,14 @@ class Prompt:
 
 
 @dataclass
+class Event:
+    """One agent-behavior event: "tool", "edit", "blind_edit", "self_correction" or "interrupt"."""
+    timestamp: datetime
+    model: Optional[str]
+    kind: str
+
+
+@dataclass
 class Session:
     session_id: str
     project: str
@@ -49,7 +62,7 @@ class Session:
     cli_versions: List[str] = field(default_factory=list)
     tool_results: int = 0
     tool_errors: int = 0
-    interrupts: int = 0
+    events: List[Event] = field(default_factory=list)
     user_modified_edits: int = 0
     compactions: int = 0
     output_tokens: int = 0
@@ -113,6 +126,9 @@ class _State:
     agent_id: Optional[str] = None
     agent_text: str = ""
     seen_message_ids: set = field(default_factory=set)
+    seen_tool_ids: set = field(default_factory=set)
+    tool_inputs: List[str] = field(default_factory=list)
+    model: Optional[str] = None
     interrupted: bool = False
 
 
@@ -131,7 +147,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
     if text is None:
         return
     if text.startswith(INTERRUPT_PREFIX):
-        session.interrupts += 1
+        session.events.append(Event(_parse_time(line.get("timestamp", "")), state.model, "interrupt"))
         state.interrupted = True
         return
     if text.startswith(SYSTEM_PREFIXES):
@@ -170,12 +186,32 @@ def _read_assistant(line: dict, session: Session, state: _State) -> None:
         state.agent_text = ""
     content = message.get("content")
     if isinstance(content, list):
-        state.agent_text += "".join(
-            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-        )
+        text = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        state.agent_text += text
+        _read_behavior(content, text, _parse_time(line.get("timestamp", "")), model, session, state)
+    state.model = model or state.model
     prompt = state.last_prompt
     if prompt is not None and prompt.model is None and model:
         prompt.model = model
+
+
+def _read_behavior(content: list, text: str, when: datetime, model: Optional[str],
+                   session: Session, state: _State) -> None:
+    """An edit is blind when no earlier tool call in the session named its file."""
+    kinds = ["self_correction"] * len(SELF_CORRECTION.findall(text))
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use" or block.get("id") in state.seen_tool_ids:
+            continue
+        state.seen_tool_ids.add(block.get("id"))
+        tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+        kinds.append("tool")
+        if block.get("name") in EDIT_TOOLS:
+            kinds.append("edit")
+            path = str(tool_input.get("file_path", ""))
+            if path and not any(path in seen for seen in state.tool_inputs):
+                kinds.append("blind_edit")
+        state.tool_inputs.append(json.dumps(tool_input))
+    session.events += [Event(when, model, kind) for kind in kinds]
 
 
 def _user_text(content: Any) -> Optional[str]:

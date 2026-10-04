@@ -21,7 +21,16 @@ class ParseSessionTest(unittest.TestCase):
         self.assertTrue(prompts[1].after_interrupt)
         self.assertFalse(prompts[0].after_interrupt)
         self.assertFalse(prompts[2].after_interrupt)
-        self.assertEqual(self.basic.interrupts, 1)
+        self.assertEqual([e.kind for e in self.basic.events].count("interrupt"), 1)
+
+    def test_behavior_events(self):
+        events = parse.parse_session(PROJ / "signals.jsonl").events
+        kinds = sorted(e.kind for e in events)
+        self.assertEqual(kinds, ["blind_edit", "edit", "edit", "edit", "interrupt",
+                                 "self_correction", "self_correction", "tool", "tool", "tool", "tool", "tool"])
+        self.assertEqual({e.model for e in events}, {"claude-opus-5-5"})
+        blind = [e for e in events if e.kind == "blind_edit"]
+        self.assertEqual(blind[0].timestamp.second, 3)
 
     def test_command_and_first_flags(self):
         prompts = self.basic.prompts
@@ -89,7 +98,7 @@ class LoadSessionsTest(unittest.TestCase):
         ids = {s.session_id for s in parse.load_sessions([ROOT])}
         self.assertNotIn("own_run", ids)
         self.assertNotIn("own_run_tool", ids)
-        self.assertEqual(ids, {"basic", "two_models", "truncated", "non_human"})
+        self.assertEqual(ids, {"basic", "two_models", "truncated", "non_human", "signals"})
 
     def test_subagents_and_empty_sessions_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
