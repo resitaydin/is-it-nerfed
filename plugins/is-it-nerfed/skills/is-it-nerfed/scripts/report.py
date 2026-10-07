@@ -1,16 +1,17 @@
 """Turn an Analysis into the terminal summary and one self-contained HTML report."""
 from __future__ import annotations
 
+import json
 import math
 import re
-from datetime import date
+from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 from string import Template
 from typing import Dict, List, Optional, Tuple
 
 from analyze import Analysis
-from signals import SignalResult
+from signals import SIGNALS, SignalResult
 from stats import BootResult, Window
 
 VERDICT_TEXT: Dict[str, str] = {
@@ -24,17 +25,40 @@ VERDICT_TEXT: Dict[str, str] = {
     "unconfirmed_worse": "probably worse, but agent behavior did not change",
 }
 WORSE = {"slightly_worse", "clearly_worse", "leaning_worse", "unconfirmed_worse"}
-INTERVAL_VERDICTS = {"no_change", "unclear"}
+# Per verdict: the status icon and word. The word is the HTML badge and the first terminal sentence.
+VERDICT_STATUS: Dict[str, Tuple[str, str]] = {
+    "no_change": ("good", "Not nerfed"),
+    "better": ("good", "Not nerfed"),
+    "leaning_better": ("good", "Not nerfed"),
+    "unclear": ("neutral", "No clear change"),
+    "slightly_worse": ("critical", "Nerfed for you"),
+    "clearly_worse": ("critical", "Nerfed for you"),
+    "leaning_worse": ("warning", "Possibly nerfed"),
+    "unconfirmed_worse": ("warning", "Possibly nerfed"),
+}
+VERDICT_DETAIL: Dict[str, str] = {
+    "no_change": "%(name)s works as well for you as before.",
+    "unclear": "The data does not show a change either way.",
+    "slightly_worse": "%(name)s is slightly worse for you (%(p)s probability).",
+    "clearly_worse": "%(name)s is clearly worse for you (%(p)s probability).",
+    "leaning_worse": "%(name)s is probably worse for you (%(p)s probability).",
+    "unconfirmed_worse": "You corrected %(name)s more often, but the agent behavior did not change (%(p)s probability).",
+    "better": "%(name)s is better for you (%(p)s probability).",
+    "leaning_better": "%(name)s is probably better for you (%(p)s probability).",
+}
 STATUS_TEXT: Dict[str, str] = {
     "too_early": "too early: fewer than 3 active days, no verdict yet",
     "judge_drift": "no verdict: the judge matched only %s of the anchor labels (it needs 80%%)",
     "no_model": "no verdict: no model found in the last 7 days",
     "no_labels": "no verdict: one window has no labeled prompts",
 }
-Z90 = 1.645
 ROLL_DAYS = 5
 SHORT_TAIL = 30
+TITLE_WIDTH = 16
+LOW_DAYS, LOW_PROMPTS = 5, 50
+HIGH_DAYS, HIGH_PROMPTS = 7, 150
 TEMPLATE = Path(__file__).with_name("report_template.html")
+CHARTJS = Path(__file__).with_name("vendor") / "chart.umd.min.js"
 
 
 # ---------- small formatters ----------
@@ -57,8 +81,8 @@ def span(w: Window) -> str:
     if start == end:
         return _day(start)
     if (start.year, start.month) == (end.year, end.month):
-        return "%s–%d" % (_day(start), end.day)
-    return "%s–%s" % (_day(start), _day(end))
+        return "%s-%d" % (_day(start), end.day)
+    return "%s-%s" % (_day(start), _day(end))
 
 
 def _pct(x: float) -> str:
@@ -77,25 +101,36 @@ def _times_interval(ratio: float, lo: float, hi: float) -> str:
     return "%s (%s to %s)" % (_times(ratio), _times(lo), _times(hi))
 
 
-def probability(verdict: str, boot: BootResult) -> str:
-    if verdict in INTERVAL_VERDICTS:
-        return "90%% interval %s to %s" % (_times(boot.ratio_lo), _times(boot.ratio_hi))
-    p = boot.p_worse if verdict in WORSE else 1 - boot.p_worse
-    return "%.0f%% probability" % (100 * p)
+def _both_zero(boot: BootResult) -> bool:
+    return _pct(boot.base_rate) == _pct(boot.recent_rate) == "0%"
 
 
 def short_projects(names: List[str]) -> Dict[str, str]:
-    """Strip the dash-bounded prefix all names share; fall back to the last 30 characters."""
+    """Strip the dash-bounded prefix all names share and cut long rests at a dash.
+
+    With no shared prefix, keep the tail of the name from a dash on."""
     unique = sorted(set(names))
     prefix = "" if len(unique) == 1 else _common_prefix(unique)
     prefix = prefix[:prefix.rfind("-") + 1]
     out = {}
     for name in unique:
         rest = name[len(prefix):]
-        if not rest or len(rest) > SHORT_TAIL:
-            rest = name if len(name) <= SHORT_TAIL else "…" + name[-SHORT_TAIL:]
-        out[name] = rest
+        if not prefix or not rest:
+            out[name] = _tail(name)
+        elif len(rest) > SHORT_TAIL:
+            head = rest[:SHORT_TAIL]
+            out[name] = head[:head.rfind("-")] + "…" if head.rfind("-") > 0 else head + "…"
+        else:
+            out[name] = rest
     return out
+
+
+def _tail(name: str) -> str:
+    if len(name) <= SHORT_TAIL:
+        return name
+    tail = name[-SHORT_TAIL:]
+    dash = tail.find("-")
+    return "…" + (tail[dash + 1:] if 0 <= dash < len(tail) - 1 else tail)
 
 
 def _common_prefix(names: List[str]) -> str:
@@ -127,34 +162,81 @@ def _status_text(a: Analysis) -> str:
 
 # ---------- terminal ----------
 
-def _side_line(side: Dict[str, dict]) -> str:
-    base, recent = side["base"], side["recent"]
-    parts = []
-    if recent["claude_md_edits"] > 0:
-        parts.append("CLAUDE.md changed %d×" % recent["claude_md_edits"])
-    if base["cli_versions"] and recent["cli_versions"] and base["cli_versions"] != recent["cli_versions"]:
-        parts.append("CLI %s → %s" % (base["cli_versions"][0], recent["cli_versions"][-1]))
-    if base["top_projects"] and recent["top_projects"]:
-        top_b, top_r = base["top_projects"][0][0], recent["top_projects"][0][0]
-        if top_b != top_r:
-            short = _side_names(side)
-            parts.append("top project %s → %s" % (short[top_b], short[top_r]))
-    return "Your side: " + (", ".join(parts) if parts else "no change found")
+def _titled(title: str, text: str) -> str:
+    return "%-*s%s" % (TITLE_WIDTH, title + ":", text)
+
+
+def _verdict_detail(a: Analysis) -> str:
+    p = a.boot.p_worse if a.verdict in WORSE else 1 - a.boot.p_worse
+    return VERDICT_DETAIL[a.verdict] % {"name": model_name(a.model), "p": _pct(100 * p)}
+
+
+def _verdict_text(a: Analysis) -> str:
+    return "%s. %s" % (VERDICT_STATUS[a.verdict][1], _verdict_detail(a))
+
+
+def _hits(rate: float, n: int) -> int:
+    return round(rate * n / 100)
+
+
+def _mistakes_text(a: Analysis) -> str:
+    b = a.boot
+    return "%d of %d prompts before (%s, %s), %d of %d now (%s, %s)." % (
+        _hits(b.base_rate, b.n_base), b.n_base, _pct(b.base_rate), span(a.base),
+        _hits(b.recent_rate, b.n_recent), b.n_recent, _pct(b.recent_rate), span(a.recent))
 
 
 def _moved(results: List[SignalResult]) -> List[SignalResult]:
     return [r for r in results if r.lo > 1 or r.hi < 1]
 
 
-def _behavior_line(a: Analysis) -> str:
-    moved = ", ".join("%s %s" % (r.signal.name, _times(r.ratio)) for r in _moved(a.signals))
-    return "Agent behavior: " + (moved or "no change found")
+def _behavior_text(a: Analysis) -> str:
+    moved = _moved(a.signals)
+    if moved:
+        text = "; ".join("%s %.1f× as often as before" % (r.signal.name, r.ratio) for r in moved)
+        return text[:1].upper() + text[1:] + "."
+    names = [s.name for s in SIGNALS]
+    return "No change in %s, or %s." % (", ".join(names[:-1]), names[-1])
 
 
-def _harness_line(a: Analysis) -> str:
+def _setup_text(side: Dict[str, dict]) -> str:
+    base, recent = side["base"], side["recent"]
+    parts = []
+    if recent["claude_md_edits"] > 0:
+        parts.append("CLAUDE.md changed %d×." % recent["claude_md_edits"])
+    if base["top_projects"] and recent["top_projects"]:
+        top_b, top_r = base["top_projects"][0][0], recent["top_projects"][0][0]
+        if top_b != top_r:
+            short = short_projects([top_b, top_r])
+            parts.append("Main project changed: %s → %s." % (short[top_b], short[top_r]))
+    return " ".join(parts) or "No change that can affect the result."
+
+
+def _claude_code_text(a: Analysis) -> str:
+    if a.attribution:
+        return "; ".join(a.attribution) + (
+            ". This can explain the drift." if a.verdict in WORSE else ". This can change model quality.")
+    new = [v for v in a.side["recent"]["cli_versions"] if v not in a.side["base"]["cli_versions"]]
+    if not new:
+        return "No update in the recent window."
+    count = "%d update%s in the recent window." % (len(new), "" if len(new) == 1 else "s")
     if not a.overlay_ok:
-        return "Harness: changelog not available: offline"
-    return "Harness: " + ("; ".join(a.attribution) if a.attribution else "no known change")
+        return count + " The changelog was not checked (offline)."
+    return count + " None can change model quality."
+
+
+def _confidence_text(a: Analysis) -> str:
+    b = a.boot
+    labeled = [d for d, _, n in a.daily if n]
+    recent_days = len([d for d in labeled if d >= a.recent[0]])
+    if recent_days < LOW_DAYS:
+        return "Low. Only %d recent day%s. Run again after %s." % (
+            recent_days, "" if recent_days == 1 else "s", _day(a.recent[1] + timedelta(days=LOW_DAYS - recent_days)))
+    fewest = min(b.n_base, b.n_recent)
+    if fewest < LOW_PROMPTS:
+        return "Low. Only %d prompts in one window." % fewest
+    level = "High" if recent_days >= HIGH_DAYS and fewest >= HIGH_PROMPTS else "Medium"
+    return "%s. %d prompts over %d days." % (level, b.n_base + b.n_recent, len(labeled))
 
 
 def _display_path(path: Path) -> str:
@@ -164,180 +246,217 @@ def _display_path(path: Path) -> str:
 
 
 def summary(a: Analysis, report_path: Path) -> List[str]:
-    name = model_name(a.model)
-    last = "Report: " + _display_path(report_path)
+    last = _titled("Report", _display_path(report_path))
     if a.status != "ok":
-        return ["%s — %s%s" % (name, _status_text(a), _counts(a)), last]
-    b = a.boot
+        text = _status_text(a) + _counts(a)
+        return [_titled("Verdict", text[:1].upper() + text[1:] + "."), last]
     return [
-        "%s — %s (%s)" % (name, VERDICT_TEXT[a.verdict], probability(a.verdict, b)),
-        "Model-caused steering: %s → %s (%s, %s), %s vs %s" % (
-            _pct(b.base_rate), _pct(b.recent_rate), _times(b.ratio), _pts(b.diff), span(a.base), span(a.recent)),
-        _behavior_line(a),
-        _side_line(a.side),
-        _harness_line(a),
+        _titled("Verdict", _verdict_text(a)),
+        _titled("Model mistakes", _mistakes_text(a)),
+        _titled("Agent behavior", _behavior_text(a)),
+        _titled("Your setup", _setup_text(a.side)),
+        _titled("Claude Code", _claude_code_text(a)),
+        _titled("Confidence", _confidence_text(a)),
         last,
     ]
 
 
 # ---------- chart ----------
 
-def wilson(k: int, n: int, z: float = Z90) -> Tuple[float, float]:
-    p = k / n
-    denom = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / denom
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return max(0.0, centre - half), min(1.0, centre + half)
-
-
-def rolling(daily: List[Tuple[date, int, int]]) -> List[Tuple[Optional[date], float, float, float]]:
-    """Per entry: pooled rate and Wilson band over up to 5 labeled days within 5 calendar days."""
+def rolling(daily: List[Tuple[date, int, int]]) -> List[Tuple[date, Optional[float]]]:
+    """Per calendar day: the pooled rate over the last 5 calendar days, or None with no prompts in them."""
+    first, last = daily[0][0], daily[-1][0]
     out = []
-    for i, (d, _, n) in enumerate(daily):
-        if n == 0:
-            out.append((None, 0.0, 0.0, 0.0))
-            continue
-        pool = [(k2, n2) for d2, k2, n2 in daily[:i + 1]
-                if n2 > 0 and (d - d2).days < ROLL_DAYS][-ROLL_DAYS:]
-        k_sum, n_sum = sum(p[0] for p in pool), sum(p[1] for p in pool)
-        lo, hi = wilson(k_sum, n_sum)
-        out.append((d, k_sum / n_sum, lo, hi))
+    for o in range(first.toordinal(), last.toordinal() + 1):
+        d = date.fromordinal(o)
+        pool = [(k, n) for d2, k, n in daily if 0 <= (d - d2).days < ROLL_DAYS]
+        n = sum(p[1] for p in pool)
+        out.append((d, sum(p[0] for p in pool) / n if n else None))
     return out
 
 
-def _segments(points: list) -> List[list]:
-    segs, cur = [], []
-    for p in points:
-        if p[0] is None:
-            if cur:
-                segs.append(cur)
-            cur = []
-        else:
-            cur.append(p)
-    if cur:
-        segs.append(cur)
-    return segs
+def chart_windows(a: Analysis) -> List[Tuple[str, Window, float]]:
+    """The Before and Now windows with the same rates the cards show."""
+    if a.boot is None:
+        return []
+    return [("Before", a.base, a.boot.base_rate), ("Now", a.recent, a.boot.recent_rate)]
 
 
-def chart_svg(daily: List[Tuple[date, int, int]], markers: List[Tuple[date, str, str]],
-              width: int = 720, height: int = 240) -> str:
-    left, right, top, bottom = 40, 12, 12, 26
-    plot_w, plot_h = width - left - right, height - top - bottom
-    first = daily[0][0]
-    days = max(1, (daily[-1][0] - first).days)
-    roll = rolling(daily)
-    peak = max([k / n for _, k, n in daily if n] + [p[3] for p in roll] + [0.1])
-    y_max = min(1.0, math.ceil(peak * 10) / 10)
-
-    def x(d: date) -> float:
-        return left + plot_w * (d - first).days / days
-
-    def y(rate: float) -> float:
-        return top + plot_h * (1 - rate / y_max)
-
-    parts = ['<svg class="chart" viewBox="0 0 %d %d" role="img" '
-             'aria-label="Daily share of model-caused steering with a 5-day rolling line">' % (width, height)]
-    for i in range(int(round(y_max * 10)) + 1):
-        tick = i / 10
-        if y_max > 0.5 and i % 2:
-            continue
-        parts.append('<line class="grid" x1="%d" x2="%d" y1="%.1f" y2="%.1f"/>'
-                     '<text class="tick" x="%d" y="%.1f" text-anchor="end">%s</text>'
-                     % (left, width - right, y(tick), y(tick), left - 6, y(tick) + 4, _pct(100 * tick)))
-    for offset in range(0, days + 1, 7):
-        d = date.fromordinal(first.toordinal() + offset)
-        parts.append('<text class="tick" x="%.1f" y="%d" text-anchor="middle">%s</text>'
-                     % (x(d), height - 8, _day(d)))
-    for d, kind, label in markers:
-        parts.append('<line class="mark %s" x1="%.1f" x2="%.1f" y1="%d" y2="%d"><title>%s, %s</title></line>'
-                     % (kind, x(d), x(d), top, top + plot_h, _day(d), escape(_marker_label(kind, label))))
-    segs = _segments(roll)
-    band = " ".join(
-        "M" + " L".join("%.1f %.1f" % (x(p[0]), y(p[3])) for p in seg)
-        + " L" + " L".join("%.1f %.1f" % (x(p[0]), y(p[2])) for p in reversed(seg)) + " Z"
-        for seg in segs)
-    line = " ".join("M" + " L".join("%.1f %.1f" % (x(p[0]), y(p[1])) for p in seg) for seg in segs)
-    parts.append('<path class="band" d="%s"/>' % band)
-    parts.append('<path class="roll" d="%s"/>' % line)
-    for d, k, n in daily:
-        if n:
-            parts.append('<circle class="dot" cx="%.1f" cy="%.1f" r="3.5"><title>%s: %d of %d (%s)</title></circle>'
-                         % (x(d), y(k / n), _day(d), k, n, _pct(100 * k / n)))
-    parts.append("</svg>")
-    return "".join(parts)
+def trend_data(daily: List[Tuple[date, int, int]], markers: List[Tuple[date, str, str]],
+               windows: List[Tuple[str, Window, float]]) -> dict:
+    """One entry per calendar day for the Chart.js trend: 5-day rate, counts, window averages, markers."""
+    points = rolling(daily)
+    first, last = points[0][0], points[-1][0]
+    index = dict((d, i) for i, (d, _) in enumerate(points))
+    counts = dict((d, [k, n]) for d, k, n in daily if n)
+    return {
+        "labels": [_day(d) for d, _ in points],
+        "rate": [round(100 * r, 1) if r is not None else None for _, r in points],
+        "counts": [counts.get(d) for d, _ in points],
+        "windows": [{"label": label, "start": index[max(w[0], first)], "end": index[min(w[1], last)],
+                     "avg": round(rate, 1)} for label, w, rate in windows],
+        "markers": [{"i": index[d], "kind": kind, "label": "%s, %s" % (_day(d), _marker_label(kind, label))}
+                    for d, kind, label in markers if d in index],
+    }
 
 
 # ---------- HTML sections ----------
 
-def _hero(a: Analysis) -> str:
-    name = escape(model_name(a.model))
+# Icon paths from Tabler Icons (MIT), inlined so the report loads nothing from the web.
+ICONS: Dict[str, str] = {
+    "good": '<path d="M5 12l5 5l10 -10"/>',
+    "warning": '<path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214'
+               'a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/>',
+    "critical": '<path d="M18 6l-12 12"/><path d="M6 6l12 12"/>',
+    "neutral": '<path d="M5 12l14 0"/>',
+}
+
+
+def _status(kind: str, word: str) -> str:
+    return ('<span class="status %s"><svg viewBox="0 0 24 24" aria-hidden="true">%s</svg>%s</span>'
+            % (kind, ICONS[kind], word))
+
+
+def _question(a: Analysis) -> str:
+    return "Is %s nerfed?" % (model_name(a.model) if a.model else "your model")
+
+
+def _header(a: Analysis) -> str:
+    when = ""
+    if a.base and a.recent:
+        when = ('<p class="meta">Compares your %s prompts before (%s) with now (%s). Other models do not count.</p>'
+                % (escape(model_name(a.model)), span(a.base), span(a.recent)))
+    return '<header><p class="product">Model drift report</p><h1>%s</h1>%s</header>' % (escape(_question(a)), when)
+
+
+def _verdict_panel(a: Analysis) -> str:
     if a.status != "ok":
         text = _status_text(a) + _counts(a)
-        return '<h1>%s</h1><p class="banner" role="status">%s.</p>' % (name, escape(text[:1].upper() + text[1:]))
+        return ('<section class="verdict">%s<p class="verdict-text">%s.</p></section>'
+                % (_status("neutral", "No verdict yet"), escape(text[:1].upper() + text[1:])))
+    kind, word = VERDICT_STATUS[a.verdict]
+    detail = _verdict_detail(a)
+    return ('<section class="verdict %s">%s<p class="verdict-text">%s</p>'
+            '<p class="confidence"><strong>Confidence</strong> %s</p></section>'
+            % (kind, _status(kind, word), escape(detail), escape(_confidence_text(a))))
+
+
+def _category(title: str, status: str, text: str, visual: str = "") -> str:
+    return ('<article class="category"><div class="category-head"><h2>%s</h2>%s</div><p>%s</p>%s</article>'
+            % (title, status, escape(text), visual))
+
+
+def _mistakes_status(a: Analysis) -> str:
+    if a.verdict in WORSE:
+        return _status("critical" if a.verdict in ("slightly_worse", "clearly_worse") else "warning", "Higher")
+    if a.verdict in ("better", "leaning_better"):
+        return _status("good", "Lower")
+    return _status("good", "Same")
+
+
+def _mistakes_visual(a: Analysis) -> str:
+    """Two large figures and two plain bars on one shared scale."""
     b = a.boot
-    head = "%s shows no change" % name if a.verdict == "no_change" else "%s is %s" % (
-        name, VERDICT_TEXT[a.verdict])
-    out = ['<h1>%s</h1>' % head,
-           '<p class="lead">Model-caused steering went from %s to %s of your labeled prompts: '
-           '%s, 90%% interval %s to %s (%s).</p>'
-           % (_pct(b.base_rate), _pct(b.recent_rate), _times(b.ratio),
-              _times(b.ratio_lo), _times(b.ratio_hi), _pts(b.diff)),
-           '<p class="meta">First days %s, %d prompts. Recent %s, %d prompts.</p>'
-           % (span(a.base), b.n_base, span(a.recent), b.n_recent)]
-    if a.shared_verdict:
-        out.append('<p class="note">Your project mix changed. On projects that appear in both windows, '
-                   'the verdict is %s; on all projects, it is %s.</p>'
-                   % (VERDICT_TEXT[a.shared_verdict], VERDICT_TEXT[a.verdict]))
-    if a.judge_agreement is not None:
-        out.append('<p class="meta">The judge matched %s of the anchor labels.</p>'
-                   % _pct(100 * a.judge_agreement))
-    return "".join(out)
+    widest = max(b.base_rate, b.recent_rate, 1.0)
+    rows = (("before", "Before", b.base_rate, b.n_base), ("now", "Now", b.recent_rate, b.n_recent))
+    figures = ('<div class="figures"><div><span class="figure">%s</span><span class="caption">Before</span></div>'
+               '<span class="arrow" aria-hidden="true">→</span>'
+               '<div><span class="figure now">%s</span><span class="caption">Now</span></div></div>'
+               % (_pct(b.base_rate), _pct(b.recent_rate)))
+    bars = "".join('<div class="bar-row"><span class="caption">%s</span><span class="bar-track">'
+                   '<span class="bar %s" style="width:%.1f%%" data-tip="%s: %d of %d prompts"></span>'
+                   '</span></div>'
+                   % (label, kind, max(100 * rate / widest, 1.5), label, _hits(rate, n), n)
+                   for kind, label, rate, n in rows)
+    return figures + '<div class="bars">%s</div>' % bars
 
 
-def _chart_section(a: Analysis) -> str:
+def _behavior_status(a: Analysis) -> str:
+    moved = _moved(a.signals)
+    if any(r.lo > 1 for r in moved):
+        return _status("warning", "Higher")
+    if moved:
+        return _status("good", "Lower")
+    return _status("good", "Same")
+
+
+def _signal_values(r: SignalResult) -> str:
+    if r.signal.scale == 100:
+        return "%.1f%% → %.1f%% of %ss" % (r.base_rate, r.recent_rate, r.signal.per)
+    return "%.1f → %.1f per 1,000 %s calls" % (r.base_rate, r.recent_rate, r.signal.per)
+
+
+def _signal_tag(r: SignalResult) -> str:
+    if r.lo > 1:
+        return '<span class="tag warning">↑ %.1f×</span>' % r.ratio
+    if r.hi < 1:
+        return '<span class="tag good">↓ %.1f×</span>' % r.ratio
+    return '<span class="tag neutral">Same</span>'
+
+
+def _signal_rows(results: List[SignalResult]) -> str:
+    return '<ul class="signals">%s</ul>' % "".join(
+        '<li class="signal-row"><span><strong>%s</strong><span class="caption">%s</span></span>%s</li>'
+        % (escape(r.signal.name[:1].upper() + r.signal.name[1:]), escape(_signal_values(r)), _signal_tag(r))
+        for r in results) if results else ""
+
+
+def _setup_status(a: Analysis) -> str:
+    return _status("good", "Same") if _setup_text(a.side).startswith("No change") else _status("warning", "Changed")
+
+
+def _claude_code_status(a: Analysis) -> str:
+    if a.attribution:
+        return _status("warning", "Check")
+    if not a.overlay_ok:
+        return _status("neutral", "Not checked")
+    return _status("good", "Same")
+
+
+def _categories(a: Analysis) -> str:
+    if a.status != "ok":
+        return ""
+    b = a.boot
+    counts = "%d of %d prompts before, %d of %d now." % (
+        _hits(b.base_rate, b.n_base), b.n_base, _hits(b.recent_rate, b.n_recent), b.n_recent)
+    return '<section class="categories">%s%s%s%s</section>' % (
+        _category("Model mistakes", _mistakes_status(a), counts, _mistakes_visual(a)),
+        _category("Agent behavior", _behavior_status(a), _behavior_text(a), _signal_rows(a.signals)),
+        _category("Your setup", _setup_status(a), _setup_text(a.side)),
+        _category("Claude Code", _claude_code_status(a), _claude_code_text(a)))
+
+
+def _trend(a: Analysis) -> str:
     if not a.daily:
         return ""
     marks = "".join('<li><span class="key %s"></span>%s, %s</li>'
                     % (kind, _day(d), escape(_marker_label(kind, label)))
                     for d, kind, label in a.markers)
-    rows = "".join("<tr><td>%s</td><td>%d</td><td>%d</td><td>%s</td></tr>"
-                   % (_day(d), k, n, _pct(100 * k / n) if n else "no labels")
-                   for d, k, n in a.daily)
-    return (
-        '<section><h2>Model-caused steering by day</h2>'
-        '<p class="meta">A prompt counts when you corrected the agent for a mistake the model made.</p>'
-        '<figure>%s<figcaption><ul class="legend">'
-        '<li><span class="key dot"></span>one day</li>'
-        '<li><span class="key roll"></span>5-day pooled rate, band is the 90%% interval</li>'
-        '%s</ul></figcaption></figure>'
-        '<details><summary>Daily counts</summary><table><thead><tr><th>Day</th><th>Steering</th>'
-        '<th>Labeled</th><th>Share</th></tr></thead><tbody>%s</tbody></table></details></section>'
-        % (chart_svg(a.daily, a.markers), marks, rows))
+    return ('<section class="trend"><h2>Model mistakes by day</h2>'
+            '<p class="meta">Share of your prompts where you corrected a mistake the model made, '
+            'over 5 days. Point at a day to see its numbers.</p>'
+            '<figure><div class="chart-box"><canvas id="trend" role="img" aria-label="Share of prompts with a '
+            'model mistake, as a 5-day rate"></canvas></div><figcaption><ul class="legend">'
+            '<li><span class="key roll"></span>5-day rate</li><li><span class="key avg"></span>Window average</li>'
+            '%s</ul></figcaption></figure></section>'
+            % marks)
 
 
-def _behavior_section(a: Analysis) -> str:
-    if not a.signals:
+def _receipts(title: str, items: List[dict]) -> str:
+    body = "".join('<figure class="receipt"><blockquote>%s</blockquote><figcaption>%s. %s</figcaption></figure>'
+                   % (escape(r["quote"]), _day(date.fromisoformat(r["date"])), escape(r["reason"]))
+                   for r in items) or '<p class="meta">No model mistakes in this window.</p>'
+    return "<div><h3>%s</h3>%s</div>" % (title, body)
+
+
+def _examples(a: Analysis) -> str:
+    if not a.receipts:
         return ""
-    rows = "".join('<tr><th scope="row">%s</th><td>%.1f</td><td>%.1f</td><td>%s</td></tr>'
-                   % (escape(r.signal.label), r.base_rate, r.recent_rate, _times_interval(r.ratio, r.lo, r.hi))
-                   for r in a.signals)
-    return ('<section><h2>Agent behavior</h2>'
-            '<p class="meta">These counts need no judge. A firm "worse" verdict needs one of them to rise too.</p>'
-            '<table class="side"><thead><tr><th></th><th>First days</th><th>Recent</th>'
-            '<th>Change, 90%% interval</th></tr></thead><tbody>%s</tbody></table></section>' % rows)
-
-
-def _compare_section(a: Analysis) -> str:
-    if a.compare is None:
-        return ""
-    c = a.compare
-    return ('<section><h2>Model against model</h2>'
-            '<p>Against %s, less controlled: different weeks. Verdict: %s.</p>'
-            '<p class="meta">%s in its last window: %s of %d prompts. %s recent: %s of %d prompts.</p>'
-            '</section>'
-            % (escape(model_name(a.prev_model)), VERDICT_TEXT[a.compare_verdict],
-               escape(model_name(a.prev_model)), _pct(c.base_rate), c.n_base,
-               escape(model_name(a.model)), _pct(c.recent_rate), c.n_recent))
+    return ('<details><summary>Examples where you corrected the model</summary>'
+            '<p class="meta">These quotes are your own prompts. This file stays on your computer.</p>'
+            '<div class="receipts">%s%s</div></details>'
+            % (_receipts("Before, " + span(a.base), a.receipts.get("base", [])),
+               _receipts("Now, " + span(a.recent), a.receipts.get("recent", []))))
 
 
 def _projects(top: List[Tuple[str, float]], short: Dict[str, str]) -> str:
@@ -356,65 +475,70 @@ SIDE_ROWS = [
 ]
 
 
-def _side_section(a: Analysis) -> str:
-    if not a.side:
+def _numbers(a: Analysis) -> str:
+    if a.status != "ok":
         return ""
-    short = _side_names(a.side)
-    rows = "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>'
-                   % (label, cell(a.side["base"], short), cell(a.side["recent"], short))
-                   for label, cell in SIDE_ROWS)
-    return ('<section><h2>Is it you?</h2>'
-            '<p class="meta">Changes on your side can move the rate too.</p>'
-            '<table class="side"><thead><tr><th></th><th>First days<br><span>%s</span></th>'
-            '<th>Recent<br><span>%s</span></th></tr></thead><tbody>%s</tbody></table></section>'
-            % (span(a.base), span(a.recent), rows))
-
-
-def _harness_section(a: Analysis) -> str:
-    if a.base is None:
-        return ""
-    if not a.overlay_ok:
-        return '<section><h2>Harness changes</h2><p>changelog not available: offline</p></section>'
-    out = ['<section><h2>Harness changes</h2>']
-    if a.attribution:
-        out.append('<p>Possible causes in the recent window:</p><ul class="causes">%s</ul>'
-                   % "".join("<li>%s</li>" % escape(line) for line in a.attribution))
+    out = ['<details><summary>All numbers</summary>']
+    b = a.boot
+    if not _both_zero(b):
+        out.append('<p>Model mistakes: %s, 90%% interval %s to %s (%s).</p>'
+                   % (_times(b.ratio), _times(b.ratio_lo), _times(b.ratio_hi), _pts(b.diff)))
+    if a.shared_verdict:
+        out.append('<p>Your project mix changed. On projects that appear in both windows, the verdict is %s; '
+                   'on all projects, it is %s.</p>' % (VERDICT_TEXT[a.shared_verdict], VERDICT_TEXT[a.verdict]))
+    if a.signals:
+        out.append('<h3>Agent behavior</h3><table><thead><tr><th></th><th>Before</th><th>Now</th>'
+                   '<th>Change, 90%% range</th></tr></thead><tbody>%s</tbody></table>'
+                   % "".join('<tr><th scope="row">%s</th><td>%.1f</td><td>%.1f</td><td>%s</td></tr>'
+                             % (escape(r.signal.label), r.base_rate, r.recent_rate,
+                                _times_interval(r.ratio, r.lo, r.hi)) for r in a.signals))
+    if a.side:
+        short = _side_names(a.side)
+        out.append('<h3>Your setup</h3><table><thead><tr><th></th><th>Before</th><th>Now</th></tr></thead>'
+                   '<tbody>%s</tbody></table>'
+                   % "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>'
+                             % (label, cell(a.side["base"], short), cell(a.side["recent"], short))
+                             for label, cell in SIDE_ROWS))
     changes = [h for h in a.harness if h.get("affects_behavior") == "yes"]
     if changes:
-        out.append('<p class="meta">CLI changes in both windows that can change model behavior:</p><dl>%s</dl>'
+        out.append('<h3>Claude Code changes that can change model quality</h3><dl>%s</dl>'
                    % "".join("<dt>%s</dt><dd>%s<span>%s</span></dd>"
-                             % (escape(h["version"]), escape(h["line"]), escape(h["reason"]))
-                             for h in changes))
-    else:
-        out.append("<p>No CLI change in these windows can change model behavior.</p>")
-    out.append("</section>")
+                             % (escape(h["version"]), escape(h["line"]), escape(h["reason"])) for h in changes))
+    if a.compare is not None:
+        c = a.compare
+        out.append('<h3>Against %s</h3><p>Less controlled: different weeks. Verdict: %s. %s: %s of %d prompts. '
+                   '%s: %s of %d prompts.</p>'
+                   % (escape(model_name(a.prev_model)), VERDICT_TEXT[a.compare_verdict],
+                      escape(model_name(a.prev_model)), _pct(c.base_rate), c.n_base,
+                      escape(model_name(a.model)), _pct(c.recent_rate), c.n_recent))
+    out.append("</details>")
     return "".join(out)
 
 
-def _receipts(title: str, items: List[dict]) -> str:
-    body = "".join('<figure class="receipt"><blockquote>%s</blockquote><figcaption>%s. %s</figcaption></figure>'
-                   % (escape(r["quote"]), _day(date.fromisoformat(r["date"])), escape(r["reason"]))
-                   for r in items) or '<p class="meta">No model-caused steering in this window.</p>'
-    return "<div><h3>%s</h3>%s</div>" % (title, body)
+def _method(a: Analysis) -> str:
+    judge = ""
+    if a.judge_agreement is not None:
+        judge = " The judge matched %s of the anchor labels." % _pct(100 * a.judge_agreement)
+    return ('<details><summary>How this works</summary>'
+            '<p>A Sonnet judge reads a sample of your prompts. For each one, it decides if you corrected a '
+            'mistake that the model made. The report compares the share of those prompts in the recent days '
+            'with the share in the days before. Agent behavior counts come from your logs and use no judge. '
+            'A firm "worse" verdict needs one of them to rise too.%s</p></details>' % judge)
 
 
-def _evidence_section(a: Analysis) -> str:
-    if not a.receipts:
-        return ""
-    return ('<section><h2>Evidence</h2><p class="meta">The worst model-caused moments, in your words.</p>'
-            '<div class="receipts">%s%s</div></section>'
-            % (_receipts("First days, " + span(a.base), a.receipts.get("base", [])),
-               _receipts("Recent, " + span(a.recent), a.receipts.get("recent", []))))
+def _script_json(data: dict) -> str:
+    return json.dumps(data).replace("</", "<\\/")
 
 
 def render(a: Analysis) -> str:
+    trend = trend_data(a.daily, a.markers, chart_windows(a)) if a.daily else None
     return Template(TEMPLATE.read_text(encoding="utf-8")).substitute(
-        title=escape("Is it nerfed? " + model_name(a.model)),
-        hero=_hero(a),
-        chart=_chart_section(a),
-        behavior=_behavior_section(a),
-        compare=_compare_section(a),
-        side=_side_section(a),
-        harness=_harness_section(a),
-        evidence=_evidence_section(a),
+        chartjs=CHARTJS.read_text(encoding="utf-8") if trend else "",
+        trend_data=_script_json(trend) if trend else "null",
+        title=escape(_question(a)),
+        header=_header(a),
+        verdict=_verdict_panel(a),
+        categories=_categories(a),
+        trend=_trend(a),
+        details=_examples(a) + _numbers(a) + _method(a),
     )

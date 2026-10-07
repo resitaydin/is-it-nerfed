@@ -63,7 +63,7 @@ def fixture(status: str = "ok") -> Analysis:
                               "reason": "The agent skipped a stated step."},
                              {"date": "2026-10-02", "quote": "stop, that file is not in scope",
                               "reason": "The agent edited an unrelated file."}]},
-        attribution=["CLI 2.1.285 started in the recent window: Changed the default effort to medium"],
+        attribution=["2.1.285: default effort lowered to medium"],
         judge_agreement=0.93, overlay_ok=True,
         signals=[SignalResult(SIGNALS[0], 8.0, 9.1, 1.1, 0.7, 1.6),
                  SignalResult(SIGNALS[1], 1.2, 3.9, 3.2, 1.8, 5.5)],
@@ -79,48 +79,80 @@ REPORT = Path("/data/report-2026-10-04.html")
 
 
 class SummaryTest(unittest.TestCase):
-    def test_summary_lines_ok(self):
+    def test_summary_lines_worse(self):
         lines = report.summary(fixture(), REPORT)
         self.assertEqual(lines, [
-            "Opus 5.5 — slightly worse (78% probability)",
-            "Model-caused steering: 9% → 15% (×1.7, +6 pts), Sep 7–20 vs Sep 21–Oct 4",
-            "Agent behavior: interrupts ×3.2",
-            "Your side: CLAUDE.md changed 2×, CLI 2.1.271 → 2.1.289, "
-            "top project ai-team-journey-analyzer → is-it-nerfed",
-            "Harness: CLI 2.1.285 started in the recent window: Changed the default effort to medium",
-            "Report: /data/report-2026-10-04.html",
+            "Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (78% probability).",
+            "Model mistakes: 15 of 160 prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
+            "Agent behavior: Interrupts 3.2× as often as before.",
+            "Your setup:     CLAUDE.md changed 2×. Main project changed: ai-team-journey-analyzer → is-it-nerfed.",
+            "Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.",
+            "Confidence:     High. 330 prompts over 27 days.",
+            "Report:         /data/report-2026-10-04.html",
         ])
 
-    def test_summary_better_and_no_change(self):
+    def test_summary_no_change_keeps_every_title(self):
         a = fixture()
-        a.verdict = "leaning_better"
-        self.assertEqual(report.summary(a, REPORT)[0], "Opus 5.5 — probably better (22% probability)")
         a.verdict = "no_change"
-        self.assertEqual(report.summary(a, REPORT)[0], "Opus 5.5 — no change (90% interval ×1.1 to ×2.6)")
-        a.verdict = "unclear"
-        self.assertEqual(report.summary(a, REPORT)[0], "Opus 5.5 — no clear change (90% interval ×1.1 to ×2.6)")
-        a.verdict = "unconfirmed_worse"
-        self.assertEqual(report.summary(a, REPORT)[0],
-                         "Opus 5.5 — probably worse, but agent behavior did not change (78% probability)")
-        a.signals = []
-        self.assertEqual(report.summary(a, REPORT)[2], "Agent behavior: no change found")
-
-    def test_summary_no_side_change_and_offline(self):
-        a = fixture()
-        a.side["recent"] = dict(a.side["base"])
-        a.overlay_ok = False
+        a.signals = [SignalResult(SIGNALS[0], 8.0, 9.1, 1.1, 0.7, 1.6)]
+        a.side["recent"] = dict(a.side["base"], cli_versions=["2.1.280", "2.1.285", "2.1.289"])
+        a.attribution = []
         lines = report.summary(a, REPORT)
-        self.assertEqual(lines[3], "Your side: no change found")
-        self.assertEqual(lines[4], "Harness: changelog not available: offline")
-        a.overlay_ok, a.attribution = True, []
-        self.assertEqual(report.summary(a, REPORT)[4], "Harness: no known change")
+        self.assertEqual(lines[:5], [
+            "Verdict:        Not nerfed. Opus 5.5 works as well for you as before.",
+            "Model mistakes: 15 of 160 prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
+            "Agent behavior: No change in blind edits, interrupts, or self-corrections.",
+            "Your setup:     No change that can affect the result.",
+            "Claude Code:    2 updates in the recent window. None can change model quality.",
+        ])
+        a.overlay_ok = False
+        self.assertEqual(report.summary(a, REPORT)[4],
+                         "Claude Code:    2 updates in the recent window. The changelog was not checked (offline).")
+        a.side["recent"]["cli_versions"] = ["2.1.280"]
+        self.assertEqual(report.summary(a, REPORT)[4], "Claude Code:    No update in the recent window.")
+
+    def test_summary_verdict_words(self):
+        a = fixture()
+        cases = {
+            "unclear": "No clear change. The data does not show a change either way.",
+            "clearly_worse": "Nerfed for you. Opus 5.5 is clearly worse for you (78% probability).",
+            "leaning_worse": "Possibly nerfed. Opus 5.5 is probably worse for you (78% probability).",
+            "unconfirmed_worse": "Possibly nerfed. You corrected Opus 5.5 more often, "
+                                 "but the agent behavior did not change (78% probability).",
+            "better": "Not nerfed. Opus 5.5 is better for you (22% probability).",
+            "leaning_better": "Not nerfed. Opus 5.5 is probably better for you (22% probability).",
+        }
+        for verdict, text in cases.items():
+            a.verdict = verdict
+            self.assertEqual(report.summary(a, REPORT)[0], "Verdict:        " + text)
+
+    def test_summary_confidence_levels(self):
+        a = fixture()
+        a.daily = [(d, k, n) for d, k, n in a.daily if d <= a.recent[0] + timedelta(days=2)]
+        self.assertEqual(report.summary(a, REPORT)[5],
+                         "Confidence:     Low. Only 3 recent days. Run again after Oct 6.")
+
+    def test_summary_project_names_shortened_as_a_pair(self):
+        a = fixture()
+        other = "-Users-resit-other-x"
+        a.side["base"]["top_projects"] = [(DIR + "ai-team-synthetic-cro-engine-ai-610-make-audience-creation", 0.6),
+                                          (other, 0.4)]
+        a.side["recent"]["top_projects"] = [(DIR + "ai-team-synthetic-cro-engine-launch-ready", 0.7), (other, 0.3)]
+        self.assertEqual(report.summary(a, REPORT)[3],
+                         "Your setup:     CLAUDE.md changed 2×. Main project changed: "
+                         "ai-610-make-audience-creation → launch-ready.")
+        a = fixture()
+        a.boot.n_base = 40
+        self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Low. Only 40 prompts in one window.")
+        a.boot.n_base = 100
+        self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Medium. 270 prompts over 27 days.")
 
     def test_summary_too_early(self):
         lines = report.summary(too_early(), REPORT)
-        self.assertEqual(len(lines), 2)
-        self.assertIn("too early", lines[0])
-        self.assertIn("16 labeled prompts", lines[0])
-        self.assertEqual(lines[1], "Report: /data/report-2026-10-04.html")
+        self.assertEqual(lines, [
+            "Verdict:        Too early: fewer than 3 active days, no verdict yet (16 labeled prompts on 2 days).",
+            "Report:         /data/report-2026-10-04.html",
+        ])
 
 
 class NamesTest(unittest.TestCase):
@@ -134,33 +166,122 @@ class NamesTest(unittest.TestCase):
         names = [DIR + "ai-team-x", DIR + "ai-tools"]
         self.assertEqual(report.short_projects(names), {names[0]: "team-x", names[1]: "tools"})
 
+    def test_short_projects_cut_long_names_at_a_dash(self):
+        names = [DIR + "ai-610-make-audience-creation-work-outside-the-u", DIR + "launch-ready"]
+        self.assertEqual(report.short_projects(names),
+                         {names[0]: "ai-610-make-audience-creation…", names[1]: "launch-ready"})
+
     def test_short_projects_single_name_falls_back_to_tail(self):
         name = DIR + "ai-team-journey-analyzer-launch-ready"
-        self.assertEqual(report.short_projects([name]), {name: "…" + name[-30:]})
+        self.assertEqual(report.short_projects([name]), {name: "…journey-analyzer-launch-ready"})
         self.assertEqual(report.short_projects(["-tmp-x"]), {"-tmp-x": "-tmp-x"})
 
 
 class ChartTest(unittest.TestCase):
-    def test_chart_gap_on_zero_label_day(self):
-        svg = report.chart_svg(fixture().daily, fixture().markers)
-        line = re.search(r'<path class="roll" d="([^"]*)"', svg).group(1)
-        self.assertEqual(line.count("M"), 2)
-        self.assertEqual(svg.count('class="dot"'), 27)
-        self.assertIn("viewBox=", svg)
+    def test_trend_data_spans_empty_days_and_uses_card_averages(self):
+        a = fixture()
+        data = report.trend_data(a.daily, a.markers, report.chart_windows(a))
+        self.assertEqual(len(data["labels"]), 28)
+        self.assertEqual(data["labels"][0], "Sep 7")
+        self.assertIsNotNone(data["rate"][20])
+        self.assertIsNone(data["counts"][20])
+        self.assertEqual(data["counts"][17], [2, 12])
+        self.assertEqual([(w["label"], w["avg"]) for w in data["windows"]], [("Before", 9.1), ("Now", 15.3)])
+        self.assertEqual((data["windows"][1]["start"], data["windows"][1]["end"]), (14, 27))
+        self.assertEqual([(m["i"], m["kind"]) for m in data["markers"]],
+                         [(9, "version"), (17, "version"), (22, "incident")])
 
-    def test_rolling_pools_last_five_labeled_days(self):
+    def test_chart_windows_empty_without_result(self):
+        self.assertEqual(report.chart_windows(Analysis(status="too_early")), [])
+
+    def test_rolling_gives_every_calendar_day_its_five_day_rate(self):
         d = START
         rows = [(d, 1, 10), (d + timedelta(days=1), 0, 0), (d + timedelta(days=2), 3, 10),
                 (d + timedelta(days=9), 5, 10)]
         points = report.rolling(rows)
-        self.assertEqual([p[0] for p in points], [rows[0][0], None, rows[2][0], rows[3][0]])
-        self.assertAlmostEqual(points[2][1], 0.2)
-        self.assertAlmostEqual(points[3][1], 0.5)
-        lo, hi = points[3][2], points[3][3]
-        self.assertTrue(0.25 < lo < 0.5 < hi < 0.75)
+        self.assertEqual([p[0] for p in points], [d + timedelta(days=i) for i in range(10)])
+        rates = [p[1] for p in points]
+        self.assertAlmostEqual(rates[1], 0.1)
+        self.assertAlmostEqual(rates[2], 0.2)
+        self.assertAlmostEqual(rates[6], 0.3)
+        self.assertEqual(rates[7:9], [None, None])
+        self.assertAlmostEqual(rates[9], 0.5)
 
 
 class RenderTest(unittest.TestCase):
+    def test_render_sections_in_order(self):
+        out = report.render(fixture())
+        heads = ["Nerfed for you", "Model mistakes", "Agent behavior", "Your setup", "Claude Code",
+                 "Model mistakes by day", "Examples where you corrected the model", "All numbers", "How this works"]
+        positions = [out.index(h) for h in heads]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('<p class="verdict-text">Opus 5.5 is slightly worse for you (78% probability).</p>', out)
+        self.assertIn("<p>15 of 160 prompts before, 26 of 170 now.</p>", out)
+
+    def test_render_header_names_model_and_dates(self):
+        out = report.render(fixture())
+        self.assertIn("<title>Is Opus 5.5 nerfed?</title>", out)
+        self.assertIn('<p class="product">Model drift report</p><h1>Is Opus 5.5 nerfed?</h1>', out)
+        self.assertIn('<p class="meta">Compares your Opus 5.5 prompts before (Sep 7-20) with now (Sep 21-Oct 4). '
+                      'Other models do not count.</p>', out)
+
+    def test_render_header_without_model_asks_generic_question(self):
+        out = report.render(Analysis(status="no_model"))
+        self.assertIn("<title>Is your model nerfed?</title>", out)
+        self.assertIn("<h1>Is your model nerfed?</h1>", out)
+
+    def test_render_status_words_per_category(self):
+        out = report.render(fixture())
+        for word in ("Higher", "Changed", "Check"):
+            self.assertIn('class="status', out)
+            self.assertIn(">%s<" % word, out)
+        a = fixture()
+        a.verdict, a.signals, a.attribution = "no_change", a.signals[:1], []
+        a.side["recent"] = dict(a.side["base"])
+        out = report.render(a)
+        self.assertIn("Not nerfed", out)
+        self.assertNotIn(">Higher<", out)
+        self.assertNotIn(">Changed<", out)
+
+    def test_render_behavior_has_one_row_per_signal(self):
+        out = report.render(fixture())
+        self.assertEqual(out.count('class="signal-row"'), 2)
+        self.assertIn("1.2 → 3.9 per 1,000 tool calls", out)
+        self.assertIn("8.0% → 9.1% of edits", out)
+        self.assertIn(">↑ 3.2×<", out)
+        self.assertIn(">Same<", out)
+
+    def test_render_mistakes_as_figures_and_bars(self):
+        out = report.render(fixture())
+        self.assertIn('class="verdict critical"', out)
+        self.assertIn('<span class="figure">9%</span>', out)
+        self.assertIn('<span class="figure now">15%</span>', out)
+        self.assertEqual(out.count('class="bar '), 2)
+
+    def test_render_details_are_closed_and_hold_the_extras(self):
+        out = report.render(fixture())
+        self.assertNotIn("<details open", out)
+        self.assertIn("Less controlled: different weeks", out)
+        self.assertIn("Changed the default effort to medium", out)
+        self.assertNotIn("Fixed a typo in /help", out)
+
+    def test_render_is_light_only(self):
+        out = report.render(fixture())
+        self.assertNotIn("prefers-color-scheme", out)
+        self.assertIn('<meta name="color-scheme" content="light">', out)
+
+    def test_render_has_no_long_dashes(self):
+        out = report.render(fixture())
+        self.assertNotIn("\u2014", out)
+        self.assertNotIn("\u2013", out)
+
+    def test_render_hides_the_ratio_when_both_rates_round_to_zero(self):
+        a = fixture()
+        a.verdict = "no_change"
+        a.boot.base_rate, a.boot.recent_rate = 0.2, 0.3
+        out = report.render(a)
+        self.assertNotIn("90% interval ×", out)
+
     def test_render_escapes_html(self):
         a = fixture()
         a.receipts["recent"][0]["quote"] = "<script>alert(1)</script>"
@@ -171,33 +292,30 @@ class RenderTest(unittest.TestCase):
     def test_render_no_external_urls(self):
         out = report.render(fixture())
         self.assertIsNone(re.search(r'(src|href)\s*=\s*["\']?\s*(https?:)?//', out))
-        self.assertNotIn("http", out)
+        self.assertNotIn("<script src", out)
+        self.assertIn("Chart.js v4.5.1", out)
+        self.assertIn("<canvas", out)
 
-    def test_render_sections_in_order(self):
-        out = report.render(fixture())
-        heads = ["Model-caused steering by day", "Agent behavior", "Model against model", "Is it you?",
-                 "Harness changes", "Evidence"]
-        positions = [out.index(h) for h in heads]
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("your project mix changed", out.lower())
-        self.assertIn("less controlled: different weeks", out)
-        self.assertIn("Changed the default effort to medium", out)
-        self.assertNotIn("Fixed a typo in /help", out)
-        self.assertIn("Interrupts per 1,000 tool calls", out)
-        self.assertIn("×3.2 (×1.8 to ×5.5)", out)
+    def test_render_escapes_script_end_in_chart_data(self):
+        a = fixture()
+        a.markers.append((START, "incident", "</script><b>x"))
+        out = report.render(a)
+        self.assertNotIn("</script><b>x", out)
 
     def test_render_offline_and_no_compare(self):
         a = fixture()
-        a.overlay_ok, a.compare = False, None
+        a.overlay_ok, a.compare, a.attribution = False, None, []
         out = report.render(a)
-        self.assertIn("changelog not available: offline", out)
-        self.assertNotIn("Model against model", out)
+        self.assertIn("The changelog was not checked (offline).", out)
+        self.assertNotIn("less controlled", out)
 
-    def test_render_non_ok_has_banner_and_no_verdict(self):
+    def test_render_non_ok_has_no_verdict(self):
         out = report.render(too_early())
+        self.assertIn("No verdict yet", out)
         self.assertIn("too early", out.lower())
-        self.assertNotIn("slightly worse", out)
-        self.assertIn("<svg", out)
+        self.assertNotIn("Nerfed for you", out)
+        self.assertNotIn("Your setup", out)
+        self.assertIn("<canvas", out)
 
 
 if __name__ == "__main__" and len(sys.argv) == 2:

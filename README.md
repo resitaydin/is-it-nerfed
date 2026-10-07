@@ -22,15 +22,16 @@ In any Claude Code session, type:
 ```
 
 Claude shows how many prompts need a label and the token cost, and asks before it starts.
-The result has 6 lines, for example:
+The result has the same 7 titled lines on every run, for example:
 
 ```
-Opus 5.5 — slightly worse (78% probability)
-Model-caused steering: 9% → 15% (×1.7, +6 pts), Sep 24–28 vs Sep 30–Oct 4
-Agent behavior: interrupts ×3.2
-Your side: CLAUDE.md changed 2×, CLI 2.1.271 → 2.1.289
-Harness: 2.1.285 changed default effort (possible cause)
-Report: ~/.claude/is-it-nerfed/report-2026-10-04.html
+Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (78% probability).
+Model mistakes: 15 of 160 prompts before (9%, Sep 24–28), 26 of 170 now (15%, Sep 30–Oct 4).
+Agent behavior: Interrupts 3.2× as often as before.
+Your setup:     CLAUDE.md changed 2×.
+Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.
+Confidence:     Medium. 330 prompts over 10 days.
+Report:         ~/.claude/is-it-nerfed/report-2026-10-04.html
 ```
 
 ## What data it reads
