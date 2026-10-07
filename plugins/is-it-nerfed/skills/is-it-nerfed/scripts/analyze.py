@@ -173,11 +173,13 @@ def _claude_code(incident: overlay.Incident) -> bool:
 
 def attribution(recent: Window, harness: List[dict], version_dates: Dict[str, date],
                 incidents: List[overlay.Incident]) -> List[str]:
-    lines = ["CLI %s started in the recent window: %s" % (h["version"], h["line"])
-             for h in harness
-             if h.get("affects_behavior") == "yes"
-             and h["version"] in version_dates and stats.in_window(version_dates[h["version"]], recent)]
-    lines += ["Incident in the recent window: %s" % i.name for i in incidents
+    by_version: Dict[str, List[str]] = {}
+    for h in harness:
+        if (h.get("affects_behavior") == "yes" and h["version"] in version_dates
+                and stats.in_window(version_dates[h["version"]], recent)):
+            by_version.setdefault(h["version"], []).append(h.get("short") or h["line"])
+    lines = ["%s: %s" % (v, "; ".join(texts)) for v, texts in by_version.items()]
+    lines += ["incident: %s" % i.name for i in incidents
               if _claude_code(i) and CAUSE_WORDS.search(i.name) and _overlaps(i, recent)]
     return lines
 

@@ -79,7 +79,8 @@ def _batch_items(paths: Paths) -> Dict[str, dict]:
 def _interp_cache(paths: Paths) -> Dict[str, dict]:
     cache: Dict[str, dict] = {}
     for row in labels_mod.read_jsonl(paths.interp_cache):
-        cache.setdefault(row["id"], row)
+        if row.get("short"):  # rows from before the short text are judged again
+            cache.setdefault(row["id"], row)
     return cache
 
 
@@ -147,10 +148,12 @@ def _merge_interp(paths: Paths) -> Dict[str, dict]:
     cache = _interp_cache(paths)
     for row in labels_mod.read_jsonl(paths.interp_labels):
         item = asked.get(row.get("id"))
-        if item is None or item["id"] in cache or row.get("affects_behavior") not in ("yes", "no"):
+        if (item is None or item["id"] in cache or row.get("affects_behavior") not in ("yes", "no")
+                or not row.get("short")):
             continue
         cache[item["id"]] = {"id": item["id"], "version": item["version"], "line": item["line"],
-                             "affects_behavior": row["affects_behavior"], "reason": row.get("reason", "")}
+                             "affects_behavior": row["affects_behavior"], "reason": row.get("reason", ""),
+                             "short": row["short"]}
         new.append(cache[item["id"]])
     labels_mod.append_cache(paths.interp_cache, new)
     return cache

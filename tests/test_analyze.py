@@ -78,10 +78,12 @@ class HelperTests(unittest.TestCase):
         rows = analyze.daily(sessions, OPUS5, labels)
         self.assertEqual(rows, [(day_n(0), 1, 2), (day_n(1), 1, 2), (day_n(2), 0, 0)])
 
-    def test_attribution_sentences(self):
+    def test_attribution_groups_by_version_and_prefers_short_text(self):
         recent = (date(2026, 9, 1), date(2026, 9, 14))
         harness = [
-            {"id": "a", "version": "2.2.0", "line": "Changed default effort", "affects_behavior": "yes", "reason": ""},
+            {"id": "a", "version": "2.2.0", "line": "Changed default effort to low", "short": "default effort lowered",
+             "affects_behavior": "yes", "reason": ""},
+            {"id": "d", "version": "2.2.0", "line": "Changed compaction", "affects_behavior": "yes", "reason": ""},
             {"id": "b", "version": "2.2.1", "line": "Fix typo", "affects_behavior": "no", "reason": ""},
             {"id": "c", "version": "2.0.0", "line": "Old", "affects_behavior": "yes", "reason": ""},
         ]
@@ -94,10 +96,8 @@ class HelperTests(unittest.TestCase):
             Incident("Degraded performance", "minor", at(date(2026, 8, 1)), at(date(2026, 8, 2)), ["Claude Code"]),
         ]
         lines = analyze.attribution(recent, harness, vd, incidents)
-        self.assertEqual(len(lines), 2)
-        self.assertIn("2.2.0", lines[0])
-        self.assertIn("Changed default effort", lines[0])
-        self.assertIn("Degraded performance on Opus", lines[1])
+        self.assertEqual(lines, ["2.2.0: default effort lowered; Changed compaction",
+                                 "incident: Degraded performance on Opus"])
 
 
 class SideChangeTests(unittest.TestCase):

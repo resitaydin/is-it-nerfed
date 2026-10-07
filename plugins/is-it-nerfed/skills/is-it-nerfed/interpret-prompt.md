@@ -13,17 +13,19 @@ The input file is JSONL: one JSON object per line, one item per object. Each ite
 
 ## The question
 
-Can this change alter how the model reasons, plans, or edits code for a user?
+Can this change make the model's answers better or worse in a normal local session?
 
-- `yes`: the change touches the model's work. Examples: effort level, thinking or reasoning
-  settings, the system prompt, compaction or summaries of the conversation, the default
-  model, context window handling, what the model sees from files or tools.
-- `no`: the change does not touch the model's work. Examples: bug fixes for the UI, the
-  terminal, key bindings, auth or login, plugins, the marketplace, MCP connection setup,
-  installers, telemetry, performance of the CLI itself, new commands that only show
-  information.
+- `yes`: the change alters what the model gets or how hard it thinks, in every normal
+  session. Examples: the default effort level, thinking or reasoning settings, the system
+  prompt, what compaction keeps, the default model, what the model sees from files or tools.
+- `no`: every other change. Examples: bug fixes for the UI, the terminal, key bindings,
+  auth or login, plugins, the marketplace, MCP connection setup, installers, telemetry,
+  performance of the CLI itself, new commands that only show information.
+- `no` also for a change that applies only on one path that most sessions do not use: one
+  provider (Bedrock, Vertex, Foundry, a gateway), cloud or remote sessions, agent teams, auto
+  mode, a model switch, a setting the user must turn on, an error or timeout path, or a retry.
 
-When a line names both kinds of change, use `yes`. When you cannot tell, use `no`.
+Use `yes` only when you are sure. When you cannot tell, use `no`.
 
 ## Output
 
@@ -34,19 +36,24 @@ comments. Do not print the results in your reply.
 Each object has these keys, in this order:
 
 ```
-{"id": "<same id as the item>", "affects_behavior": "yes | no", "reason": "<one short sentence>"}
+{"id": "<same id as the item>", "affects_behavior": "yes | no", "reason": "<one short sentence>", "short": "<at most 8 words>"}
 ```
 
 - `reason` is one sentence or less.
+- `short` says what changed for the user in at most 8 plain words, with no version number,
+  no code, and no backticks. Example: "default effort lowered to medium".
 - Label every item in the file. Do not skip an item and do not add items.
 
 ## Examples
 
 Item: `{"id": "c1", "version": "2.1.285", "line": "Changed the default effort level to medium for Opus"}`
-Result: `{"id": "c1", "affects_behavior": "yes", "reason": "A lower default effort can change how much the model reasons."}`
+Result: `{"id": "c1", "affects_behavior": "yes", "reason": "A lower default effort can change how much the model reasons.", "short": "default effort lowered to medium"}`
 
 Item: `{"id": "c2", "version": "2.1.286", "line": "Fixed a crash when resizing the terminal during login"}`
-Result: `{"id": "c2", "affects_behavior": "no", "reason": "A terminal and login fix does not touch the model's work."}`
+Result: `{"id": "c2", "affects_behavior": "no", "reason": "A terminal and login fix does not touch the model's work.", "short": "terminal crash at login fixed"}`
 
 Item: `{"id": "c3", "version": "2.1.287", "line": "Auto-compact now keeps fewer earlier tool results"}`
-Result: `{"id": "c3", "affects_behavior": "yes", "reason": "Compaction changes what context the model sees."}`
+Result: `{"id": "c3", "affects_behavior": "yes", "reason": "Compaction changes what context the model sees.", "short": "compaction keeps fewer tool results"}`
+
+Item: `{"id": "c4", "version": "2.1.288", "line": "Changed Opus to use a 1M context window by default on Bedrock and Vertex"}`
+Result: `{"id": "c4", "affects_behavior": "no", "reason": "It applies only to Bedrock and Vertex users.", "short": "1M context default on Bedrock and Vertex"}`

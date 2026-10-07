@@ -92,7 +92,9 @@ class CliTest(unittest.TestCase):
         self.write_labels(scan)
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.strip().splitlines()), 6)
+        lines = result.stdout.strip().splitlines()
+        self.assertIn("Opus 5.5", lines[0])
+        self.assertTrue(lines[-1].startswith("Report:"))
         self.assertTrue((self.data / ("report-%s.html" % TODAY)).exists())
         self.assertTrue((self.data / "cache" / "labels.jsonl").exists())
         self.assertTrue((self.data / "cache" / "baselines.json").exists())
@@ -173,6 +175,23 @@ class CliTest(unittest.TestCase):
         rows = [json.loads(l) for l in Path(online["interpret_batch"]).read_text().splitlines()]
         extra = sample.estimate_tokens(rows, 1)
         self.assertEqual(online["estimated_tokens"], offline["estimated_tokens"] + extra)
+
+    def test_interp_cache_drops_rows_without_short_text(self):
+        import cli
+        paths = cli.Paths(str(self.home / "data"))
+        paths.interp_cache.parent.mkdir(parents=True)
+        rows = [{"id": "old", "version": "1", "line": "x", "affects_behavior": "yes", "reason": ""},
+                {"id": "new", "version": "1", "line": "y", "affects_behavior": "no", "reason": "", "short": "y"}]
+        paths.interp_cache.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        self.assertEqual(list(cli._interp_cache(paths)), ["new"])
+
+    def test_merge_interp_skips_rows_without_short_text(self):
+        import cli
+        paths = cli.Paths(str(self.home / "data"))
+        paths.work.mkdir(parents=True)
+        paths.to_interpret.write_text(json.dumps({"id": "a", "version": "1", "line": "x"}) + "\n")
+        paths.interp_labels.write_text(json.dumps({"id": "a", "affects_behavior": "yes", "reason": ""}) + "\n")
+        self.assertEqual(cli._merge_interp(paths), {})
 
     def test_too_early(self):
         for path in sorted((self.home / ".claude" / "projects" / "-proj").glob("*.jsonl")):
