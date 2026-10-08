@@ -1,7 +1,8 @@
 # Judge evaluation
 
 This folder measures the judge against labels that the author corrects by hand.
-The release gate is Cohen's kappa of 0.7 or more on both steering and cause.
+The verdict counts only one label: steering that the model caused. The release gate scores only that label.
+It needs 30 or more reference positives, a kappa of 0.7 or more, and a false-alarm rate of 1% or less.
 The folder `eval/data/` is git-ignored. It holds private prompts.
 
 ## Procedure
@@ -15,14 +16,20 @@ The folder `eval/data/` is git-ignored. It holds private prompts.
    Do not open `key.jsonl` during this step. The key holds the date and the model.
 4. Run `python3 eval/score.py eval/data/gold.jsonl eval/data/pred.jsonl`.
    The script scores only the ids that are in both files. It prints how many ids it skipped.
-5. Check the gate. Kappa on steering and kappa on cause must both be 0.7 or more.
-   If one kappa is lower, change `judge-prompt.md`, run steps 2 to 4 again, and add a row to the table.
+5. Check the gate. If it fails, change `judge-prompt.md`, run steps 2 to 4 again, and add a row to the table.
 
 ## Metrics
 
-- Kappa on steering: binary, `kind == steering`, over all common ids.
-- Kappa on cause: three classes, over the ids where gold kind is steering.
-- Precision and recall of model-caused steering: gold is the truth.
+The gate metrics use one binary label: `kind == steering` and `cause == model`.
+
+- False-alarm rate: false positives over reference negatives. A false alarm adds to both
+  windows, so it pulls the rate ratio toward 1 and hides a real change. This is the main metric.
+- Recall: a missed positive does not bias the rate ratio while recall stays the same over
+  time. It only makes the verdict less sure. The script reports it, but the gate does not use it.
+- Kappa with a 95% bootstrap interval, and Gwet's AC1. Kappa is unstable when positives are
+  rare, so read it with the interval and the counts.
+- Diagnostics: kappa on steering, and the three-class kappa on cause. The verdict does not use
+  these labels, so they are not part of the gate.
 
 ## Attempts
 

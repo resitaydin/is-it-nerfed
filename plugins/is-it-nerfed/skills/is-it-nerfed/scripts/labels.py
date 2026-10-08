@@ -77,7 +77,9 @@ def is_model_steering(label: dict) -> bool:
 
 
 def anchor_agreement(labels_by_id: Dict[str, dict], anchors: List[dict]) -> Optional[float]:
-    """Share of labeled anchors whose label matches gold kind, and gold cause for steering.
+    """Share of labeled anchors whose model-caused label matches the gold one.
+
+    The verdict counts only model-caused steering, so other label differences do not count.
 
     None when fewer than MIN_ANCHORS anchors have a label.
     """
@@ -85,6 +87,6 @@ def anchor_agreement(labels_by_id: Dict[str, dict], anchors: List[dict]) -> Opti
     labeled = [(a, labels_by_id[i]) for a, i in ids if i in labels_by_id]
     if len(labeled) < MIN_ANCHORS:
         return None
-    agreed = sum(1 for a, label in labeled if label.get("kind") == a["gold_kind"]
-                 and (a["gold_kind"] != "steering" or label.get("cause") == a["gold_cause"]))
+    agreed = sum(1 for a, label in labeled
+                 if is_model_steering(label) == is_model_steering({"kind": a["gold_kind"], "cause": a["gold_cause"]}))
     return agreed / len(labeled)

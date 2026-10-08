@@ -50,9 +50,10 @@ class AnchorSetTest(unittest.TestCase):
         good = perfect_labels(anchors)
         self.assertEqual(labels.anchor_agreement(good, anchors), 1.0)
         flipped = dict(good)
-        for key in list(flipped)[:7]:
-            row = flipped[key]
-            flipped[key] = {"kind": "other" if row["kind"] != "other" else "new_work", "cause": row["cause"]}
+        model_ids = [sample.item_id("anchor-" + a["anchor_id"]) for a in anchors
+                     if a["gold_kind"] == "steering" and a["gold_cause"] == "model"]
+        for key in model_ids[:7]:
+            flipped[key] = dict(flipped[key], cause="unclear")
         self.assertLess(labels.anchor_agreement(flipped, anchors), 0.8)
 
     def test_anchor_agreement_ignores_missing_anchors(self):
@@ -71,11 +72,16 @@ class AnchorSetTest(unittest.TestCase):
 
     def test_anchor_agreement_rules(self):
         anchors = ([{"anchor_id": "s%d" % i, "gold_kind": "steering", "gold_cause": "model"} for i in range(10)]
-                   + [{"anchor_id": "n%d" % i, "gold_kind": "new_work", "gold_cause": "unclear"} for i in range(10)])
-        # Cause matters only for steering.
-        wrong_cause = {sample.item_id("anchor-" + a["anchor_id"]): {"kind": a["gold_kind"], "cause": "user"}
-                       for a in anchors}
-        self.assertEqual(labels.anchor_agreement(wrong_cause, anchors), 0.5)
+                   + [{"anchor_id": "u%d" % i, "gold_kind": "steering", "gold_cause": "user"} for i in range(5)]
+                   + [{"anchor_id": "n%d" % i, "gold_kind": "new_work", "gold_cause": "unclear"} for i in range(5)])
+        # Only the model-caused label counts: a user/unclear swap or a new_work/other swap agrees.
+        labels_by_id = {}
+        for a in anchors:
+            model = a["gold_cause"] == "model"
+            labels_by_id[sample.item_id("anchor-" + a["anchor_id"])] = (
+                {"kind": "steering", "cause": "user"} if model
+                else {"kind": "other" if a["gold_kind"] == "new_work" else "steering", "cause": "unclear"})
+        self.assertEqual(labels.anchor_agreement(labels_by_id, anchors), 0.5)
 
 if __name__ == "__main__":
     unittest.main()
