@@ -14,9 +14,9 @@ import make_set  # noqa: E402
 import score  # noqa: E402
 
 
-def prompt(uuid, text, after_interrupt=False):
+def prompt(uuid, text, after_interrupt=False, history=()):
     return parse.Prompt(uuid, "s", "p", datetime(2026, 1, 1, tzinfo=timezone.utc), text, "m", "1.0.0",
-                        False, False, after_interrupt, "", [])
+                        False, False, after_interrupt, "", list(history))
 
 
 class KappaTest(unittest.TestCase):
@@ -117,6 +117,23 @@ class MakeSetTest(unittest.TestCase):
     def test_negation_start(self):
         self.assertTrue(make_set.is_candidate(prompt("a", "  Don't do that")))
         self.assertFalse(make_set.is_candidate(prompt("a", "nothing here")))
+
+    def test_model_hint_phrases(self):
+        for text in ["I asked for snake_case", "it still fails", "you didn't run the tests",
+                     "same error as before", "that does not work"]:
+            self.assertTrue(make_set.is_model_hint(prompt("a", text)), text)
+        self.assertFalse(make_set.is_model_hint(prompt("a", "add a logout button")))
+
+    def test_model_hint_repeated_instruction(self):
+        earlier = "push your changes then merge it gracefully."
+        self.assertTrue(make_set.is_model_hint(prompt("a", "push your changes then merge it gracefully",
+                                                      history=["other", earlier])))
+        self.assertFalse(make_set.is_model_hint(prompt("a", "ok", history=["ok"])))
+
+    def test_pick_hints_skips_known_ids(self):
+        prompts = [prompt("h%d" % i, "it still fails") for i in range(5)] + [prompt("o", "add a test")]
+        picked = make_set.pick_hints(prompts, 10, seed=1, skip={"h0"})
+        self.assertEqual(sorted(p.uuid for p in picked), ["h1", "h2", "h3", "h4"])
 
 
 if __name__ == "__main__":

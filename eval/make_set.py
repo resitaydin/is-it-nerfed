@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import random
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent
                        / "plugins/is-it-nerfed/skills/is-it-nerfed/scripts"))
@@ -22,6 +23,30 @@ NEGATION_START = re.compile(r"(?:%s)\b" % "|".join(re.escape(w) for w in NEGATIO
 
 def is_candidate(p: parse.Prompt) -> bool:
     return p.after_interrupt or bool(NEGATION_START.match(p.text.strip().lower()))
+
+# Phrases that often mean the agent missed an instruction: the rare model-caused positives.
+MODEL_HINT = re.compile(r"\b(?:i (?:asked|said|told)|again|still|you (?:didn't|did not|forgot|missed|ignored)"
+                        r"|(?:doesn't|does not|didn't|did not|not) work|same (?:error|issue|problem))\b")
+REPEAT_MIN_CHARS = 15
+REPEAT_RATIO = 0.8
+
+
+def is_model_hint(p: parse.Prompt) -> bool:
+    """A hint phrase, or a prompt that repeats one of the last 3 prompts (the agent did not do it)."""
+    text = p.text.strip().lower()
+    if MODEL_HINT.search(text):
+        return True
+    return len(text) >= REPEAT_MIN_CHARS and any(
+        difflib.SequenceMatcher(None, text, h.strip().lower()).ratio() >= REPEAT_RATIO for h in p.history[:3])
+
+
+def pick_hints(prompts: List[parse.Prompt], n: int, seed: int, skip: Set[str]) -> List[parse.Prompt]:
+    """Take up to n eligible model-hint or steering-candidate prompts that are not in skip."""
+    pool = sorted((p for p in prompts if sample.eligible(p) and p.uuid not in skip
+                   and (is_model_hint(p) or is_candidate(p))),
+                  key=lambda p: p.uuid)
+    random.Random(seed).shuffle(pool)
+    return pool[:n]
 
 
 def pick(prompts: List[parse.Prompt], n: int, seed: int) -> Tuple[List[parse.Prompt], int]:
@@ -43,10 +68,18 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--n", type=int, default=200)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "data")
+    parser.add_argument("--hints-only", type=Path, metavar="KEY",
+                        help="take only model-hint or steering-candidate prompts that are not in this key file")
     args = parser.parse_args(argv)
     sessions = parse.load_sessions(parse.find_roots(Path.home(), os.environ))
-    picked, pool = pick([p for s in sessions for p in s.prompts], args.n, args.seed)
-    random.Random(args.seed).shuffle(picked)
+    prompts = [p for s in sessions for p in s.prompts]
+    if args.hints_only:
+        skip = {json.loads(line)["uuid"] for line in args.hints_only.read_text().splitlines() if line.strip()}
+        picked = pick_hints(prompts, args.n, args.seed, skip)
+        pool = len(picked)
+    else:
+        picked, pool = pick(prompts, args.n, args.seed)
+        random.Random(args.seed).shuffle(picked)
     args.out.mkdir(parents=True, exist_ok=True)
     items = [sample.build_item(p) for p in picked]
     keys = [{"id": i["id"], "uuid": p.uuid, "model": p.model, "date": p.timestamp.date().isoformat()}
