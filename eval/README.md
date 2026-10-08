@@ -59,6 +59,22 @@ is the best of the three, so it stays. It has no false alarms on the first 200 i
 is about 0.6, which costs power but does not bias the rate ratio. The rules of attempt 6 found
 more positives, but they added 20 false alarms, so they were not kept.
 
+### Judge model comparison
+
+Same 370 items and the current prompt. Each judge is scored against Fable alone (17 positives),
+because the Opus+Fable reference would favor Opus. False alarms on the first 200 items have 194 Fable negatives.
+
+| Date | Judge | TP / FP / FN | Kappa (95% CI) | False alarms first 200 |
+| ---- | ----- | ------------ | -------------- | ---------------------- |
+| 2026-10-08 | Opus 5.5 | 13 / 5 / 4 | 0.73 (0.52–0.88) | 3 / 194 |
+| 2026-10-08 | Sonnet | 10 / 4 / 7 | 0.63 (0.39–0.81) | 0 / 194 |
+| 2026-10-08 | Haiku 5.5 | 11 / 21 / 6 | 0.41 (0.22–0.58) | 10 / 194 |
+
+Result: Sonnet stays the judge. It has the fewest false alarms, which is the main metric. Opus
+finds more positives, but its kappa interval overlaps Sonnet's, and it costs more of the user's
+plan. Opus would also judge its own work when the user asks about Opus. Haiku 5.5 gives too many
+false alarms.
+
 ## Verdict calibration
 
 Synthetic sessions at a 3.5% base rate (8 prompts per session, 200 runs per row), the same
