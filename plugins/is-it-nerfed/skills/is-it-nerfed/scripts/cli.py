@@ -169,7 +169,8 @@ def report_cmd(args: argparse.Namespace) -> int:
     cache = labels_mod.load_cache(paths.labels_cache)
     new = [{"uuid": plan["items"][i], **label} for i, label in found.items()
            if i in plan["items"] and plan["items"][i] not in cache]
-    if not analyze.judge_drifted(judge.get("agreement")):  # keep no labels from a drifted judge, so they are made again
+    # Cache only labels from a judge that this run checked and found sound; others are made again.
+    if agreement is not None and not analyze.judge_drifted(agreement):
         jsonl.append(paths.labels_cache, new)
     cache.update({r["uuid"]: r for r in new})
     sessions = parse.load_sessions(parse.find_roots(Path.home(), os.environ))

@@ -222,13 +222,12 @@ def _base_counts(sessions: List[parse.Session], model: str, base: Window, labels
     """The base counts of steering and of each signal: the saved ones, or new ones from the logs.
 
     The saved counts outlive the logs, which Claude Code deletes after 30 days by default."""
-    saved = baselines.get(model)
-    if saved is None:
-        return session_counts(sessions, model, base, labels), signals_mod.window_counts(sessions, model, base)
-    if "signals" not in saved:  # saved before the signals were frozen
-        return [tuple(c) for c in saved["sessions"]], signals_mod.window_counts(sessions, model, base)
-    return ([tuple(c) for c in saved["sessions"]],
-            {name: [tuple(c) for c in counts] for name, counts in saved["signals"].items()})
+    saved = baselines.get(model, {})
+    counts = ([tuple(c) for c in saved["sessions"]] if "sessions" in saved
+              else session_counts(sessions, model, base, labels))
+    signals = ({name: [tuple(c) for c in rows] for name, rows in saved["signals"].items()} if "signals" in saved
+               else signals_mod.window_counts(sessions, model, base))
+    return counts, signals
 
 
 def _shown(verdict: Optional[str], confirmed: bool) -> Optional[str]:
@@ -264,7 +263,8 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     confirmed = signals_mod.confirms_worse(out.signals)
     verdict = stats.verdict(out.boot)
     out.verdict = _shown(verdict, confirmed)
-    out.shared_verdict = _shown(_shared_verdict(sessions, base_counts, recent_counts, verdict), confirmed)
+    shared = _shown(_shared_verdict(sessions, base_counts, recent_counts, verdict), confirmed)
+    out.shared_verdict = shared if shared != out.verdict else None
     out.prev_model = previous_model(sessions, model)
     if out.prev_model:
         prev = session_counts(sessions, out.prev_model, prev_window(sessions, out.prev_model), labels)
@@ -277,8 +277,15 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     out.receipts = {"base": receipts(sessions, model, base, labels),
                     "recent": receipts(sessions, model, recent, labels)}
     out.attribution = attribution(recent, out.harness, version_dates, incidents)
-    if model in baselines or len(days) < FREEZE_DAYS:
-        return out, baselines
-    frozen = {"start": base[0].isoformat(), "end": base[1].isoformat(), "sessions": [list(c) for c in base_counts],
-              "signals": {name: [list(c) for c in counts] for name, counts in base_signals.items()}}
-    return out, {**baselines, model: frozen}
+    signals = {name: [list(c) for c in counts] for name, counts in base_signals.items()}
+    saved = baselines.get(model)
+    if saved is None:
+        if len(days) < FREEZE_DAYS:
+            return out, baselines
+        frozen = {"start": base[0].isoformat(), "end": base[1].isoformat(),
+                  "sessions": [list(c) for c in base_counts], "signals": signals}
+        return out, {**baselines, model: frozen}
+    if "signals" not in saved and any(signals.values()):
+        # A baseline saved before the signals were frozen gets them while its logs remain.
+        return out, {**baselines, model: {**saved, "signals": signals}}
+    return out, baselines

@@ -38,15 +38,45 @@ class ParseLinesTest(unittest.TestCase):
         session = parse_lines(
             user("Fix the build", 1), assistant([{"type": "text", "text": "Done."}], 2),
             user("did claude get dumber?", 3),
-            assistant([tool("Skill", skill="is-it-nerfed")], 4),
-            user([{"type": "text", "text": "Base directory for this skill: /h/skills/is-it-nerfed"}], 5, isMeta=True),
+            assistant([tool("Bash", command='python3 "/h/skills/is-it-nerfed/scripts/cli.py" scan')], 4),
             user("Fix the tests", 6))
         self.assertEqual([p.text for p in session.prompts], ["Fix the build"])
 
-    def test_absolute_path_prompt_is_not_a_command(self):
-        session = parse_lines(user("/model opus", 1), user("/Users/me/app.py still throws", 2), user("/clear", 3))
-        self.assertEqual([p.is_command for p in session.prompts], [True, False, True])
+    def test_only_a_lone_slash_word_is_a_plain_text_command(self):
+        session = parse_lines(user("/compact", 1), user("/Users/me/app.py still throws", 2),
+                              user("/tmp is full again", 3))
+        self.assertEqual([p.is_command for p in session.prompts], [True, False, False])
+
+    def test_first_prompt_is_the_one_before_any_agent_reply(self):
+        session = parse_lines(user("/compact", 1), user("hi", 2), assistant([{"type": "text", "text": "ok"}], 3),
+                              user("wrong loop", 4))
         self.assertEqual([p.is_first for p in session.prompts], [False, True, False])
+        after_command = parse_lines(user("<command-name>/review</command-name>", 1),
+                                    assistant([{"type": "text", "text": "Review."}], 2), user("finding 3 is wrong", 3))
+        self.assertFalse(after_command.prompts[1].is_first)
+
+    def test_reading_the_tool_source_does_not_cut_the_session(self):
+        session = parse_lines(
+            user("fix the parser", 1),
+            assistant([tool("Read", file_path="/r/plugins/is-it-nerfed/skills/is-it-nerfed/scripts/parse.py")], 2),
+            user("now the tests", 3))
+        self.assertEqual(len(session.prompts), 2)
+
+    def test_typed_request_with_the_marker_is_left_out_and_nothing_else(self):
+        session = parse_lines(user("Fix the build", 1),
+                              user("python3 /h/skills/is-it-nerfed/scripts/cli.py scan", 2))
+        self.assertEqual([p.text for p in session.prompts], ["Fix the build"])
+
+    def test_compaction_after_a_command_belongs_to_the_last_real_prompt(self):
+        session = parse_lines(user("work", 1), assistant([{"type": "text", "text": "ok"}], 2),
+                              user("/compact", 3), {"type": "system", "subtype": "compact_boundary"})
+        self.assertEqual(session.prompts[0].compactions, 1)
+
+    def test_messages_without_id_each_count(self):
+        session = parse_lines(user("go", 1),
+                              {"type": "assistant", "message": {"model": "m", "content": [], "usage": {"output_tokens": 500}}},
+                              {"type": "assistant", "message": {"model": "m", "content": [], "usage": {"output_tokens": 300}}})
+        self.assertEqual(session.prompts[0].output_tokens, 800)
 
     def test_bash_command_with_non_ascii_path_names_the_file(self):
         session = parse_lines(

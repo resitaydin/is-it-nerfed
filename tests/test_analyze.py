@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 
 import analyze
@@ -195,6 +196,24 @@ class RunTests(unittest.TestCase):
         analysis, _ = run(sessions, labels_for(sessions, lambda d: d >= day_n(10)))
         self.assertEqual(analysis.verdict, "unconfirmed_worse")
         self.assertIsNone(analysis.shared_verdict)
+
+    def test_shared_verdict_hidden_when_it_shows_the_same_as_the_main_one(self):
+        sessions = days_sessions(20, n=8)
+        labels = labels_for(sessions, lambda d: d >= day_n(10))
+        with mock.patch.object(analyze, "_shared_verdict", return_value="slightly_worse"):
+            analysis, _ = run(sessions, labels)
+        self.assertEqual(analysis.verdict, "unconfirmed_worse")
+        self.assertIsNone(analysis.shared_verdict)
+
+    def test_old_baseline_gets_the_signal_counts_while_the_logs_remain(self):
+        sessions = days_sessions(30, n=8)
+        for s in sessions:
+            s.events = [parse.Event(s.prompts[0].timestamp, OPUS5, k) for k in ["tool"] * 10 + ["interrupt"]]
+        labels = labels_for(sessions, lambda d: False)
+        _, saved = run(sessions, labels)
+        old = {OPUS5: {k: v for k, v in saved[OPUS5].items() if k != "signals"}}
+        _, again = run(sessions, labels, baselines=old)
+        self.assertEqual(again, saved)
 
     def test_frozen_baseline_keeps_the_signal_counts(self):
         sessions = days_sessions(40, n=8)

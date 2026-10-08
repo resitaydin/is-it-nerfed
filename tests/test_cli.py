@@ -142,6 +142,17 @@ class CliTest(unittest.TestCase):
         self.assertIn("anchor labels", result.stdout)
         self.assertEqual(jsonl.read(self.data / "cache" / "labels.jsonl"), [])
 
+    def test_labels_without_a_judge_check_are_not_cached(self):
+        scan = self.scan()
+        self.write_labels(scan)
+        (self.data / "cache").mkdir(parents=True, exist_ok=True)
+        (self.data / "cache" / "judge.json").write_text('{"agreement": 1.0, "date": "x"}')
+        anchor_ids = {sample.anchor_item_id(a) for a in jsonl.read(ANCHORS)}
+        out = Path(scan["labels_dir"]) / "labels-001.jsonl"
+        jsonl.write(out, [l for l in jsonl.read(out) if l["id"] not in anchor_ids])
+        self.assertEqual(self.run_cli("report", "--final").returncode, 0)
+        self.assertEqual(jsonl.read(self.data / "cache" / "labels.jsonl"), [])
+
     def test_second_scan_skips_cached(self):
         scan = self.scan()
         self.write_labels(scan)

@@ -19,11 +19,12 @@ SYSTEM_PREFIXES = (
     "<system-reminder>",
 )
 COMMAND_TAGS = ("<command-name>", "<command-message>")
-SLASH_COMMAND = re.compile(r"/[\w:-]+(?:\s|$)")  # "/model opus", not "/Users/me/app.py"
+# Commands with arguments come in command tags; plain text holds only a lone "/compact" or the like.
+SLASH_COMMAND = re.compile(r"/[\w:-]+\s*")
 NOT_HUMAN_FLAGS = ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")
-OWN_COMMAND = "<command-name>/is-it-nerfed"
-# A log line that shows this tool ran: the skill was loaded, its script ran, or its data was read.
-OWN_MARKERS = ("skills/is-it-nerfed", "is-it-nerfed/work/")
+# A log line that shows this tool ran: its command, a run of its script, or a read of its data.
+OWN_RUN = re.compile(r"<command-name>/is-it-nerfed|skills/is-it-nerfed/scripts/cli\.py\W+(?:scan|report)"
+                     r"|is-it-nerfed/work/")
 SYNTHETIC_MODEL = "<synthetic>"
 EDIT_TOOLS = ("Edit", "MultiEdit")
 SELF_CORRECTION = re.compile(
@@ -98,30 +99,43 @@ def parse_session(path: Path) -> Session:
     state = _State()
     with path.open(encoding="utf-8", errors="replace") as f:
         for raw in f:
-            if OWN_COMMAND in raw:
+            try:
+                line = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(line, dict) or line.get("isSidechain"):
+                continue
+            if OWN_RUN.search(raw):
+                if _typed_text(line) is None and session.prompts:
+                    session.prompts.pop()  # the request in plain words that made the agent run this tool
                 break
-            if any(marker in raw for marker in OWN_MARKERS):
-                if session.prompts:
-                    session.prompts.pop()  # the plain-words request that started the tool
-                break
-            _read_line(raw, session, state)
+            _read_line(line, session, state)
     return session
 
 
-def _read_line(raw: str, session: Session, state: _State) -> None:
-    try:
-        line = json.loads(raw)
-    except ValueError:
-        return
-    if not isinstance(line, dict) or line.get("isSidechain"):
-        return
+def _typed_text(line: dict) -> Optional[str]:
+    """The text of a line that the user typed, else None."""
+    if line.get("type") != "user" or any(line.get(flag) for flag in NOT_HUMAN_FLAGS):
+        return None
+    content = (line.get("message") or {}).get("content")
+    if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+        return None
+    return _user_text(content)
+
+
+def _turn(session: Session) -> Optional[Prompt]:
+    """The last prompt that is not a command: the work that tool calls, tokens and compactions belong to."""
+    return next((p for p in reversed(session.prompts) if not p.is_command), None)
+
+
+def _read_line(line: dict, session: Session, state: _State) -> None:
     kind = line.get("type")
     if kind == "user":
         _read_user(line, session, state)
     elif kind == "assistant":
         _read_assistant(line, session, state)
-    elif kind == "system" and line.get("subtype") == "compact_boundary" and session.prompts:
-        session.prompts[-1].compactions += 1
+    elif kind == "system" and line.get("subtype") == "compact_boundary" and _turn(session):
+        _turn(session).compactions += 1
     elif kind == "attachment" and not session.claude_md_files:
         session.claude_md_files = _claude_md_files(line.get("attachment"))
 
@@ -139,7 +153,7 @@ class _State:
 
 
 def _read_user(line: dict, session: Session, state: _State) -> None:
-    turn = session.prompts[-1] if session.prompts else None
+    turn = _turn(session)
     result = line.get("toolUseResult")
     content = (line.get("message") or {}).get("content")
     blocks = content if isinstance(content, list) else []
@@ -148,9 +162,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         turn.user_edits += isinstance(result, dict) and result.get("userModified") is True
         turn.tool_results += len(results)
         turn.tool_errors += sum(1 for b in results if b.get("is_error") is True)
-    if results or any(line.get(flag) for flag in NOT_HUMAN_FLAGS):
-        return
-    text = _user_text(content)
+    text = _typed_text(line)
     if text is None:
         return
     if text.startswith(INTERRUPT_PREFIX):
@@ -159,7 +171,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         return
     if text.startswith(SYSTEM_PREFIXES):
         return
-    is_command = text.startswith(COMMAND_TAGS) or bool(SLASH_COMMAND.match(text))
+    is_command = text.startswith(COMMAND_TAGS) or bool(SLASH_COMMAND.fullmatch(text))
     prompt = Prompt(
         uuid=line.get("uuid", ""),
         session_id=session.session_id,
@@ -168,7 +180,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         text=text,
         model=None,
         cli_version=line.get("version", ""),
-        is_first=not is_command and all(p.is_command for p in session.prompts),  # the first real prompt
+        is_first=not is_command and state.agent_id is None,  # no agent reply yet: nothing to steer
         is_command=is_command,
         after_interrupt=state.interrupted,
         prev_agent_text=state.agent_text,
@@ -186,11 +198,13 @@ def _read_assistant(line: dict, session: Session, state: _State) -> None:
     message_id = message.get("id")
     # Each content block of a message has its own line, and the usage on later lines can be larger.
     tokens = (message.get("usage") or {}).get("output_tokens") or 0
-    before = state.message_tokens.get(message_id, 0)
+    before = state.message_tokens.get(message_id, 0) if message_id else 0
+    turn = _turn(session)
     if tokens > before:
-        state.message_tokens[message_id] = tokens
-        if session.prompts:
-            session.prompts[-1].output_tokens += tokens - before
+        if message_id:
+            state.message_tokens[message_id] = tokens
+        if turn is not None:
+            turn.output_tokens += tokens - before
     if message_id != state.agent_id:
         state.agent_id = message_id
         state.agent_text = ""
