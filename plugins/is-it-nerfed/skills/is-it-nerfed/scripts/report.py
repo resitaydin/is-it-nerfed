@@ -282,7 +282,7 @@ def trend_data(daily: List[Tuple[date, int, int]], markers: List[Tuple[date, str
         "rate": [round(100 * r, 1) if r is not None else None for _, r in points],
         "counts": [counts.get(d) for d, _ in points],
         "windows": [{"label": label, "start": index[max(w[0], first)], "end": index[min(w[1], last)],
-                     "avg": round(rate, 1)} for label, w, rate in windows],
+                     "avg": round(rate, 1)} for label, w, rate in windows if w[0] <= last and w[1] >= first],
         "markers": [{"i": index[d], "kind": kind, "label": "%s, %s" % (_day(d), _marker_label(kind, label))}
                     for d, kind, label in markers if d in index],
     }

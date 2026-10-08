@@ -189,6 +189,12 @@ class ChartTest(unittest.TestCase):
         self.assertEqual([(m["i"], m["kind"]) for m in data["markers"]],
                          [(9, "version"), (17, "version"), (22, "incident")])
 
+    def test_trend_data_skips_a_window_before_the_logs(self):
+        a = fixture()
+        old = (a.daily[0][0] - timedelta(days=30), a.daily[0][0] - timedelta(days=16))
+        data = report.trend_data(a.daily, a.markers, [("Before", old, 5.0), ("Now", a.recent, 15.3)])
+        self.assertEqual([w["label"] for w in data["windows"]], ["Now"])
+
     def test_chart_windows_empty_without_result(self):
         self.assertEqual(report.chart_windows(Analysis(status="too_early")), [])
 

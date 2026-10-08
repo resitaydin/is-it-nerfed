@@ -18,10 +18,12 @@ SYSTEM_PREFIXES = (
     "<bash-input>",
     "<system-reminder>",
 )
-COMMAND_PREFIXES = ("<command-name>", "<command-message>", "/")
+COMMAND_TAGS = ("<command-name>", "<command-message>")
+SLASH_COMMAND = re.compile(r"/[\w:-]+(?:\s|$)")  # "/model opus", not "/Users/me/app.py"
 NOT_HUMAN_FLAGS = ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")
 OWN_COMMAND = "<command-name>/is-it-nerfed"
-OWN_DATA_DIR = "is-it-nerfed/work/"
+# A log line that shows this tool ran: the skill was loaded, its script ran, or its data was read.
+OWN_MARKERS = ("skills/is-it-nerfed", "is-it-nerfed/work/")
 SYNTHETIC_MODEL = "<synthetic>"
 EDIT_TOOLS = ("Edit", "MultiEdit")
 SELF_CORRECTION = re.compile(
@@ -43,6 +45,12 @@ class Prompt:
     after_interrupt: bool
     prev_agent_text: str
     history: List[str]
+    # Activity in the turn that this prompt started, up to the next prompt.
+    tool_results: int = 0
+    tool_errors: int = 0
+    user_edits: int = 0
+    compactions: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
@@ -59,13 +67,7 @@ class Session:
     project: str
     prompts: List[Prompt] = field(default_factory=list)
     claude_md_files: Dict[str, str] = field(default_factory=dict)
-    tool_results: int = 0
-    tool_errors: int = 0
     events: List[Event] = field(default_factory=list)
-    user_modified_edits: int = 0
-    compactions: int = 0
-    output_tokens: int = 0
-    is_own: bool = False
 
 
 def find_roots(home: Path, env: Mapping[str, str]) -> List[Path]:
@@ -85,23 +87,24 @@ def load_sessions(roots: List[Path]) -> List[Session]:
     for root in roots:
         for path in sorted(root.glob("projects/*/*.jsonl")):
             session = parse_session(path)
-            if session.prompts and not session.is_own:
+            if session.prompts:
                 sessions.append(session)
     return sessions
 
 
 def parse_session(path: Path) -> Session:
-    """A session that this tool ran in is marked is_own; its parse stops at the first sign of it."""
+    """The session up to the request that ran this tool: that request and all later lines are left out."""
     session = Session(session_id=path.stem, project=path.parent.name)
     state = _State()
     with path.open(encoding="utf-8", errors="replace") as f:
         for raw in f:
-            if OWN_DATA_DIR in raw:
-                session.is_own = True
-                return session
+            if OWN_COMMAND in raw:
+                break
+            if any(marker in raw for marker in OWN_MARKERS):
+                if session.prompts:
+                    session.prompts.pop()  # the plain-words request that started the tool
+                break
             _read_line(raw, session, state)
-    if any(OWN_COMMAND in p.text for p in session.prompts):
-        session.is_own = True
     return session
 
 
@@ -117,8 +120,8 @@ def _read_line(raw: str, session: Session, state: _State) -> None:
         _read_user(line, session, state)
     elif kind == "assistant":
         _read_assistant(line, session, state)
-    elif kind == "system" and line.get("subtype") == "compact_boundary":
-        session.compactions += 1
+    elif kind == "system" and line.get("subtype") == "compact_boundary" and session.prompts:
+        session.prompts[-1].compactions += 1
     elif kind == "attachment" and not session.claude_md_files:
         session.claude_md_files = _claude_md_files(line.get("attachment"))
 
@@ -127,23 +130,24 @@ def _read_line(raw: str, session: Session, state: _State) -> None:
 class _State:
     agent_id: Optional[str] = None
     agent_text: str = ""
-    seen_message_ids: set = field(default_factory=set)
+    message_tokens: Dict[str, int] = field(default_factory=dict)  # largest output_tokens per message id
     seen_tool_ids: set = field(default_factory=set)
-    tool_paths: set = field(default_factory=set)  # exact file paths named by earlier tool calls
-    tool_inputs: List[str] = field(default_factory=list)
+    tool_values: set = field(default_factory=set)  # every string input of earlier tool calls
+    commands: List[str] = field(default_factory=list)  # earlier Bash commands, which can name a file anywhere
     model: Optional[str] = None
     interrupted: bool = False
 
 
 def _read_user(line: dict, session: Session, state: _State) -> None:
+    turn = session.prompts[-1] if session.prompts else None
     result = line.get("toolUseResult")
-    if isinstance(result, dict) and result.get("userModified") is True:
-        session.user_modified_edits += 1
     content = (line.get("message") or {}).get("content")
     blocks = content if isinstance(content, list) else []
     results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
-    session.tool_results += len(results)
-    session.tool_errors += sum(1 for b in results if b.get("is_error") is True)
+    if turn is not None:
+        turn.user_edits += isinstance(result, dict) and result.get("userModified") is True
+        turn.tool_results += len(results)
+        turn.tool_errors += sum(1 for b in results if b.get("is_error") is True)
     if results or any(line.get(flag) for flag in NOT_HUMAN_FLAGS):
         return
     text = _user_text(content)
@@ -155,6 +159,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         return
     if text.startswith(SYSTEM_PREFIXES):
         return
+    is_command = text.startswith(COMMAND_TAGS) or bool(SLASH_COMMAND.match(text))
     prompt = Prompt(
         uuid=line.get("uuid", ""),
         session_id=session.session_id,
@@ -163,8 +168,8 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         text=text,
         model=None,
         cli_version=line.get("version", ""),
-        is_first=not session.prompts,
-        is_command=text.startswith(COMMAND_PREFIXES),
+        is_first=not is_command and all(p.is_command for p in session.prompts),  # the first real prompt
+        is_command=is_command,
         after_interrupt=state.interrupted,
         prev_agent_text=state.agent_text,
         history=[p.text for p in reversed(session.prompts)],
@@ -179,10 +184,13 @@ def _read_assistant(line: dict, session: Session, state: _State) -> None:
     if model == SYNTHETIC_MODEL:
         return
     message_id = message.get("id")
-    if message_id not in state.seen_message_ids:
-        state.seen_message_ids.add(message_id)
-        usage = message.get("usage") or {}
-        session.output_tokens += usage.get("output_tokens") or 0
+    # Each content block of a message has its own line, and the usage on later lines can be larger.
+    tokens = (message.get("usage") or {}).get("output_tokens") or 0
+    before = state.message_tokens.get(message_id, 0)
+    if tokens > before:
+        state.message_tokens[message_id] = tokens
+        if session.prompts:
+            session.prompts[-1].output_tokens += tokens - before
     if message_id != state.agent_id:
         state.agent_id = message_id
         state.agent_text = ""
@@ -199,7 +207,9 @@ def _read_assistant(line: dict, session: Session, state: _State) -> None:
 
 def _read_behavior(content: list, text: str, when: datetime, model: Optional[str],
                    session: Session, state: _State) -> None:
-    """An edit is blind when no earlier tool call in the session named its file."""
+    """An edit is blind when no earlier tool call in the session named its file.
+
+    A tool call names a file when one of its inputs is the path, or a Bash command contains it."""
     kinds = ["self_correction"] * len(SELF_CORRECTION.findall(text))
     for block in content:
         if not isinstance(block, dict) or block.get("type") != "tool_use" or block.get("id") in state.seen_tool_ids:
@@ -210,10 +220,11 @@ def _read_behavior(content: list, text: str, when: datetime, model: Optional[str
         if block.get("name") in EDIT_TOOLS:
             kinds.append("edit")
             path = str(tool_input.get("file_path", ""))
-            if path and path not in state.tool_paths and not any(path in seen for seen in reversed(state.tool_inputs)):
+            if path and path not in state.tool_values and not any(path in c for c in reversed(state.commands)):
                 kinds.append("blind_edit")
-        state.tool_paths.update(str(v) for v in tool_input.values() if isinstance(v, str))
-        state.tool_inputs.append(json.dumps(tool_input))
+        state.tool_values.update(v for v in tool_input.values() if isinstance(v, str))
+        if block.get("name") == "Bash" and isinstance(tool_input.get("command"), str):
+            state.commands.append(tool_input["command"])
     session.events += [Event(when, model, kind) for kind in kinds]
 
 

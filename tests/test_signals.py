@@ -36,7 +36,8 @@ class CompareTest(unittest.TestCase):
     def test_interrupts_up_confirms_worse(self):
         base = [session("b%d" % i, date(2026, 9, 1 + i), calls(100, 1)) for i in range(10)]
         recent = [session("r%d" % i, date(2026, 9, 15 + i), calls(100, 6)) for i in range(10)]
-        results = signals.compare(base + recent, OPUS5, BASE, RECENT)
+        both = base + recent
+        results = signals.compare(*(signals.window_counts(both, OPUS5, w) for w in (BASE, RECENT)))
         self.assertEqual([r.signal.name for r in results], ["interrupts", "self-corrections"])
         r = results[0]
         self.assertAlmostEqual(r.base_rate, 10.0)
@@ -47,7 +48,8 @@ class CompareTest(unittest.TestCase):
     def test_no_change_does_not_confirm(self):
         sessions = [session("b%d" % i, date(2026, 9, 1 + i), calls(100, 2)) for i in range(10)]
         sessions += [session("r%d" % i, date(2026, 9, 15 + i), calls(100, 2)) for i in range(10)]
-        self.assertFalse(signals.confirms_worse(signals.compare(sessions, OPUS5, BASE, RECENT)))
+        counts = [signals.window_counts(sessions, OPUS5, w) for w in (BASE, RECENT)]
+        self.assertFalse(signals.confirms_worse(signals.compare(*counts)))
         self.assertFalse(signals.confirms_worse([]))
 
 

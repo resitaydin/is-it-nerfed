@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import parse
 import stats
@@ -55,11 +55,16 @@ def session_counts(sessions: List[parse.Session], model: str, window: Window,
     return counts
 
 
-def compare(sessions: List[parse.Session], model: str, base: Window, recent: Window) -> List[SignalResult]:
+def window_counts(sessions: List[parse.Session], model: str, window: Window) -> Dict[str, List[SessionCount]]:
+    """Per signal name: the session counts in the window."""
+    return {signal.name: session_counts(sessions, model, window, signal) for signal in SIGNALS}
+
+
+def compare(base: Dict[str, List[SessionCount]], recent: Dict[str, List[SessionCount]]) -> List[SignalResult]:
     """One result per signal that has events on both sides."""
     out = []
     for signal in SIGNALS:
-        b, r = (session_counts(sessions, model, w, signal) for w in (base, recent))
+        b, r = base.get(signal.name, []), recent.get(signal.name, [])
         if b and r:
             ratio, lo, hi = stats.ratio_bootstrap(b, r)
             scale = signal.scale / 100

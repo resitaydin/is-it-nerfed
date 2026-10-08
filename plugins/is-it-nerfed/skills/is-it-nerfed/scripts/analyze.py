@@ -48,6 +48,10 @@ class Analysis:
     signals: List[signals_mod.SignalResult] = field(default_factory=list)
 
 
+def judge_drifted(agreement: Optional[float]) -> bool:
+    return agreement is not None and agreement < DRIFT_THRESHOLD
+
+
 def family(model: str) -> str:
     return re.sub(r"(-\d+)+$", "", model)
 
@@ -124,17 +128,17 @@ def side_changes(sessions: List[parse.Session], model: str, window: Window) -> d
     ids = {p.session_id for p in prompts}
     chosen = [s for s in sessions if s.session_id in ids]
     n_prompts = len(prompts) or 1
-    results = sum(s.tool_results for s in chosen)
+    results = sum(p.tool_results for p in prompts)
     shares = Counter(p.project for p in prompts).most_common(3)
     return {
         "claude_md_edits": _claude_md_edits(chosen),
         "cli_versions": sorted({p.cli_version for p in prompts if p.cli_version}, key=_version_key),
         "median_prompt_chars": int(statistics.median(len(p.text) for p in prompts)) if prompts else 0,
         "top_projects": [(name, n / n_prompts) for name, n in shares],
-        "compactions_per_session": sum(s.compactions for s in chosen) / (len(chosen) or 1),
-        "tool_error_rate": sum(s.tool_errors for s in chosen) / results if results else 0.0,
-        "user_edits": sum(s.user_modified_edits for s in chosen),
-        "output_tokens_per_prompt": sum(s.output_tokens for s in chosen) / n_prompts,
+        "compactions_per_session": sum(p.compactions for p in prompts) / (len(chosen) or 1),
+        "tool_error_rate": sum(p.tool_errors for p in prompts) / results if results else 0.0,
+        "user_edits": sum(p.user_edits for p in prompts),
+        "output_tokens_per_prompt": sum(p.output_tokens for p in prompts) / n_prompts,
     }
 
 
@@ -213,13 +217,23 @@ def _shared_verdict(sessions: List[parse.Session], base: List[SessionCount],
     return other if other != main else None
 
 
-def _base_counts(sessions: List[parse.Session], model: str, base: Window,
-                 labels: Dict[str, dict], baselines: dict) -> List[SessionCount]:
-    """The saved base counts of the model, or the counts from the labels when none are saved."""
+def _base_counts(sessions: List[parse.Session], model: str, base: Window, labels: Dict[str, dict],
+                 baselines: dict) -> Tuple[List[SessionCount], Dict[str, List[SessionCount]]]:
+    """The base counts of steering and of each signal: the saved ones, or new ones from the logs.
+
+    The saved counts outlive the logs, which Claude Code deletes after 30 days by default."""
     saved = baselines.get(model)
-    if saved is not None:
-        return [tuple(s) for s in saved["sessions"]]
-    return session_counts(sessions, model, base, labels)
+    if saved is None:
+        return session_counts(sessions, model, base, labels), signals_mod.window_counts(sessions, model, base)
+    if "signals" not in saved:  # saved before the signals were frozen
+        return [tuple(c) for c in saved["sessions"]], signals_mod.window_counts(sessions, model, base)
+    return ([tuple(c) for c in saved["sessions"]],
+            {name: [tuple(c) for c in counts] for name, counts in saved["signals"].items()})
+
+
+def _shown(verdict: Optional[str], confirmed: bool) -> Optional[str]:
+    """A firm "worse" needs a behavior signal that rose too."""
+    return "unconfirmed_worse" if verdict in FIRM_WORSE and not confirmed else verdict
 
 
 def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str, dict],
@@ -235,22 +249,22 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
         return out, baselines
     base, recent = windows
     out.base, out.recent = base, recent
-    base_counts = _base_counts(sessions, model, base, labels, baselines)
+    base_counts, base_signals = _base_counts(sessions, model, base, labels, baselines)
     recent_counts = session_counts(sessions, model, recent, labels)
     if not stats.totals(base_counts)[1] or not stats.totals(recent_counts)[1]:
         out.status = "no_labels"
-    elif judge_agreement is not None and judge_agreement < DRIFT_THRESHOLD:
+    elif judge_drifted(judge_agreement):
         out.status = "judge_drift"
     else:
         out.status = "ok"
     if out.status != "ok":
         return out, baselines
     out.boot = stats.cluster_bootstrap(base_counts, recent_counts)
-    out.verdict = stats.verdict(out.boot)
-    out.signals = signals_mod.compare(sessions, model, base, recent)
-    if out.verdict in FIRM_WORSE and not signals_mod.confirms_worse(out.signals):
-        out.verdict = "unconfirmed_worse"
-    out.shared_verdict = _shared_verdict(sessions, base_counts, recent_counts, out.verdict)
+    out.signals = signals_mod.compare(base_signals, signals_mod.window_counts(sessions, model, recent))
+    confirmed = signals_mod.confirms_worse(out.signals)
+    verdict = stats.verdict(out.boot)
+    out.verdict = _shown(verdict, confirmed)
+    out.shared_verdict = _shown(_shared_verdict(sessions, base_counts, recent_counts, verdict), confirmed)
     out.prev_model = previous_model(sessions, model)
     if out.prev_model:
         prev = session_counts(sessions, out.prev_model, prev_window(sessions, out.prev_model), labels)
@@ -265,5 +279,6 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     out.attribution = attribution(recent, out.harness, version_dates, incidents)
     if model in baselines or len(days) < FREEZE_DAYS:
         return out, baselines
-    frozen = {"start": base[0].isoformat(), "end": base[1].isoformat(), "sessions": [list(c) for c in base_counts]}
+    frozen = {"start": base[0].isoformat(), "end": base[1].isoformat(), "sessions": [list(c) for c in base_counts],
+              "signals": {name: [list(c) for c in counts] for name, counts in base_signals.items()}}
     return out, {**baselines, model: frozen}

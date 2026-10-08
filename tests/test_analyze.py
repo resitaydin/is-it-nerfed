@@ -124,6 +124,17 @@ class VersionOrderTests(unittest.TestCase):
         self.assertEqual(side["cli_versions"], ["2.1.99", "2.1.100", "2.1.x"])
 
 
+class SideChangesTest(unittest.TestCase):
+    def test_counts_only_the_turns_in_the_window(self):
+        s = make_session("s", day_n(0), OPUS5, n=2)
+        s.prompts[0].tool_results, s.prompts[0].tool_errors, s.prompts[0].output_tokens = 10, 5, 900
+        s.prompts[1].timestamp += timedelta(days=5)
+        s.prompts[1].tool_results, s.prompts[1].output_tokens = 10, 100
+        side = analyze.side_changes([s], OPUS5, (day_n(0), day_n(1)))
+        self.assertEqual(side["tool_error_rate"], 0.5)
+        self.assertEqual(side["output_tokens_per_prompt"], 900)
+
+
 class RunTests(unittest.TestCase):
     def test_no_labels_status(self):
         sessions = days_sessions(30)
@@ -178,6 +189,25 @@ class RunTests(unittest.TestCase):
         confirmed, _ = run(sessions, labels)
         self.assertIn(confirmed.verdict, analyze.FIRM_WORSE)
         self.assertEqual(confirmed.signals[0].direction, "up")
+
+    def test_shared_verdict_compares_the_verdict_before_the_downgrade(self):
+        sessions = days_sessions(20, n=8)
+        analysis, _ = run(sessions, labels_for(sessions, lambda d: d >= day_n(10)))
+        self.assertEqual(analysis.verdict, "unconfirmed_worse")
+        self.assertIsNone(analysis.shared_verdict)
+
+    def test_frozen_baseline_keeps_the_signal_counts(self):
+        sessions = days_sessions(40, n=8)
+        for s in sessions:
+            when = s.prompts[0].timestamp
+            late = when.date() >= day_n(26)
+            s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["interrupt"] * (6 if late else 1)]
+        labels = labels_for(sessions, lambda d: d >= day_n(26))
+        _, saved = run(sessions[:28], labels)
+        # The logs of the base window are gone; only the frozen counts remain.
+        later, _ = run(sessions[20:], labels, baselines=saved)
+        self.assertEqual([r.direction for r in later.signals][:1], ["up"])
+        self.assertIn(later.verdict, analyze.FIRM_WORSE)
 
     def test_compare_needs_ok_status_and_labels_on_both_sides(self):
         prev = days_sessions(6, OPUS4, start=date(2026, 6, 1))

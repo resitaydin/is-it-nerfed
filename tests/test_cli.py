@@ -69,8 +69,8 @@ class CliTest(unittest.TestCase):
     def batch_items(self, scan: dict) -> list:
         return [row for p in scan["batches"] for row in jsonl.read(Path(p))]
 
-    def write_labels(self, scan: dict, skip: int = 0) -> None:
-        gold_by_id = {sample.anchor_item_id(a): a for a in jsonl.read(ANCHORS)}
+    def write_labels(self, scan: dict, skip: int = 0, judge_ok: bool = True) -> None:
+        gold_by_id = {sample.anchor_item_id(a): a for a in jsonl.read(ANCHORS) if judge_ok}
         labels = []
         for item in self.batch_items(scan):
             anchor = gold_by_id.get(item["id"])
@@ -133,6 +133,14 @@ class CliTest(unittest.TestCase):
         out = json.loads(result.stdout)
         self.assertEqual(out["status"], "no_logs")
         self.assertIn("No session logs found in:", out["message"])
+
+    def test_labels_of_a_drifted_judge_are_not_cached(self):
+        scan = self.scan()
+        self.write_labels(scan, judge_ok=False)
+        result = self.run_cli("report", "--final")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("anchor labels", result.stdout)
+        self.assertEqual(jsonl.read(self.data / "cache" / "labels.jsonl"), [])
 
     def test_second_scan_skips_cached(self):
         scan = self.scan()
