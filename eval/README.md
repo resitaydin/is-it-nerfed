@@ -41,6 +41,24 @@ The reference is the consensus of independent Opus and Fable labels (175 of 200 
 | 2026-10-04 | 2 | Sonnet, original prompt | 0.85 | 0.62 | 1.00 | 0.67 |
 | 2026-10-04 | 3 | Sonnet, stricter cause rules (reverted) | 0.72 | 0.40 | 1.00 | 0.83 |
 
+### Attempts on the model-caused gate
+
+Set: the 200 items above plus 170 model-hint items (`make_set.py --hints-only`, every unused
+candidate in the author's logs). The reference is the 361 items where Opus and Fable agree on the
+model-caused label. Opus vs Fable kappa on that label is 0.73, which is the ceiling.
+False alarms are split into the first 200 items (191 negatives) and the hint items (157 hard negatives).
+
+| Date | Attempt | Judge and prompt | Ref positives | TP / FP / FN | Kappa (95% CI) | False alarms first 200 / hint |
+| ---- | ------- | ---------------- | ------------- | ------------ | -------------- | ----------------------------- |
+| 2026-10-08 | 4 | Sonnet, current prompt | 13 | 8 / 4 / 5 | 0.63 (0.33–0.83) | 0 / 4 |
+| 2026-10-08 | 5 | Sonnet, attempt 3 prompt | 13 | 5 / 3 / 8 | 0.46 (0.15–0.70) | 0 / 3 |
+| 2026-10-08 | 6 | Sonnet, "repeat" and "clear instruction" rules | 13 | 10 / 20 / 3 | 0.44 (0.23–0.61) | 3 / 17 |
+
+Result: the gate fails. The logs have only 13 reference positives, not 30. The current prompt
+is the best of the three, so it stays. It has no false alarms on the first 200 items. Its recall
+is about 0.6, which costs power but does not bias the rate ratio. The rules of attempt 6 found
+more positives, but they added 20 false alarms, so they were not kept.
+
 ## Verdict calibration
 
 Synthetic sessions at a 3.5% base rate (8 prompts per session, 200 runs per row), the same
