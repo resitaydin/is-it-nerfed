@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from datetime import date, timedelta
 from html import escape
@@ -12,44 +11,31 @@ from typing import Dict, List, Optional, Tuple
 
 from analyze import Analysis
 from signals import SIGNALS, SignalResult
-from stats import BootResult, Window
+from stats import Window
 
-VERDICT_TEXT: Dict[str, str] = {
-    "no_change": "no change",
-    "slightly_worse": "slightly worse",
-    "clearly_worse": "clearly worse",
-    "better": "better",
-    "leaning_worse": "probably worse",
-    "leaning_better": "probably better",
-    "unclear": "no clear change",
-    "unconfirmed_worse": "probably worse, but agent behavior did not change",
+# Per verdict: the status icon, the word (the HTML badge and the first terminal sentence),
+# the short text, and the detail sentence.
+VERDICTS: Dict[str, Tuple[str, str, str, str]] = {
+    "no_change": ("good", "Not nerfed", "no change", "%(name)s works as well for you as before."),
+    "better": ("good", "Not nerfed", "better", "%(name)s is better for you (%(p)s probability)."),
+    "leaning_better": ("good", "Not nerfed", "probably better",
+                       "%(name)s is probably better for you (%(p)s probability)."),
+    "unclear": ("neutral", "No clear change", "no clear change", "The data does not show a change either way."),
+    "slightly_worse": ("critical", "Nerfed for you", "slightly worse",
+                       "%(name)s is slightly worse for you (%(p)s probability)."),
+    "clearly_worse": ("critical", "Nerfed for you", "clearly worse",
+                      "%(name)s is clearly worse for you (%(p)s probability)."),
+    "leaning_worse": ("warning", "Possibly nerfed", "probably worse",
+                      "%(name)s is probably worse for you (%(p)s probability)."),
+    "unconfirmed_worse": ("warning", "Possibly nerfed", "probably worse, but agent behavior did not change",
+                          "You corrected %(name)s more often, but the agent behavior did not change "
+                          "(%(p)s probability)."),
 }
-WORSE = {"slightly_worse", "clearly_worse", "leaning_worse", "unconfirmed_worse"}
-# Per verdict: the status icon and word. The word is the HTML badge and the first terminal sentence.
-VERDICT_STATUS: Dict[str, Tuple[str, str]] = {
-    "no_change": ("good", "Not nerfed"),
-    "better": ("good", "Not nerfed"),
-    "leaning_better": ("good", "Not nerfed"),
-    "unclear": ("neutral", "No clear change"),
-    "slightly_worse": ("critical", "Nerfed for you"),
-    "clearly_worse": ("critical", "Nerfed for you"),
-    "leaning_worse": ("warning", "Possibly nerfed"),
-    "unconfirmed_worse": ("warning", "Possibly nerfed"),
-}
-VERDICT_DETAIL: Dict[str, str] = {
-    "no_change": "%(name)s works as well for you as before.",
-    "unclear": "The data does not show a change either way.",
-    "slightly_worse": "%(name)s is slightly worse for you (%(p)s probability).",
-    "clearly_worse": "%(name)s is clearly worse for you (%(p)s probability).",
-    "leaning_worse": "%(name)s is probably worse for you (%(p)s probability).",
-    "unconfirmed_worse": "You corrected %(name)s more often, but the agent behavior did not change (%(p)s probability).",
-    "better": "%(name)s is better for you (%(p)s probability).",
-    "leaning_better": "%(name)s is probably better for you (%(p)s probability).",
-}
+WORSE = {v for v, (kind, _, _, _) in VERDICTS.items() if kind in ("critical", "warning")}
+BETTER = {"better", "leaning_better"}
 STATUS_TEXT: Dict[str, str] = {
     "too_early": "too early: fewer than 3 active days, no verdict yet",
     "judge_drift": "no verdict: the judge matched only %s of the anchor labels (it needs 80%%)",
-    "no_model": "no verdict: no model found in the last 7 days",
     "no_labels": "no verdict: one window has no labeled prompts",
 }
 ROLL_DAYS = 5
@@ -101,8 +87,8 @@ def _times_interval(ratio: float, lo: float, hi: float) -> str:
     return "%s (%s to %s)" % (_times(ratio), _times(lo), _times(hi))
 
 
-def _both_zero(boot: BootResult) -> bool:
-    return _pct(boot.base_rate) == _pct(boot.recent_rate) == "0%"
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def short_projects(names: List[str]) -> Dict[str, str]:
@@ -155,9 +141,11 @@ def _counts(a: Analysis) -> str:
     return " (%d labeled prompts on %d days)" % (sum(n for _, _, n in a.daily), len(a.daily))
 
 
-def _status_text(a: Analysis) -> str:
+def _no_verdict_text(a: Analysis) -> str:
     text = STATUS_TEXT[a.status]
-    return text % _pct(100 * a.judge_agreement) if a.status == "judge_drift" else text
+    if a.status == "judge_drift":
+        text %= _pct(100 * a.judge_agreement)
+    return _cap(text + _counts(a)) + "."
 
 
 # ---------- terminal ----------
@@ -168,38 +156,35 @@ def _titled(title: str, text: str) -> str:
 
 def _verdict_detail(a: Analysis) -> str:
     p = a.boot.p_worse if a.verdict in WORSE else 1 - a.boot.p_worse
-    return VERDICT_DETAIL[a.verdict] % {"name": model_name(a.model), "p": _pct(100 * p)}
+    return VERDICTS[a.verdict][3] % {"name": model_name(a.model), "p": _pct(100 * p)}
 
 
 def _verdict_text(a: Analysis) -> str:
-    return "%s. %s" % (VERDICT_STATUS[a.verdict][1], _verdict_detail(a))
-
-
-def _hits(rate: float, n: int) -> int:
-    return round(rate * n / 100)
+    return "%s. %s" % (VERDICTS[a.verdict][1], _verdict_detail(a))
 
 
 def _mistakes_text(a: Analysis) -> str:
     b = a.boot
     return "%d of %d prompts before (%s, %s), %d of %d now (%s, %s)." % (
-        _hits(b.base_rate, b.n_base), b.n_base, _pct(b.base_rate), span(a.base),
-        _hits(b.recent_rate, b.n_recent), b.n_recent, _pct(b.recent_rate), span(a.recent))
+        b.k_base, b.n_base, _pct(b.base_rate), span(a.base),
+        b.k_recent, b.n_recent, _pct(b.recent_rate), span(a.recent))
 
 
 def _moved(results: List[SignalResult]) -> List[SignalResult]:
-    return [r for r in results if r.lo > 1 or r.hi < 1]
+    return [r for r in results if r.direction]
 
 
 def _behavior_text(a: Analysis) -> str:
     moved = _moved(a.signals)
     if moved:
         text = "; ".join("%s %.1f× as often as before" % (r.signal.name, r.ratio) for r in moved)
-        return text[:1].upper() + text[1:] + "."
+        return _cap(text) + "."
     names = [s.name for s in SIGNALS]
     return "No change in %s, or %s." % (", ".join(names[:-1]), names[-1])
 
 
-def _setup_text(side: Dict[str, dict]) -> str:
+def _setup_parts(side: Dict[str, dict]) -> List[str]:
+    """Sentences for each setup change that can affect the result."""
     base, recent = side["base"], side["recent"]
     parts = []
     if recent["claude_md_edits"] > 0:
@@ -209,7 +194,11 @@ def _setup_text(side: Dict[str, dict]) -> str:
         if top_b != top_r:
             short = short_projects([top_b, top_r])
             parts.append("Main project changed: %s → %s." % (short[top_b], short[top_r]))
-    return " ".join(parts) or "No change that can affect the result."
+    return parts
+
+
+def _setup_text(side: Dict[str, dict]) -> str:
+    return " ".join(_setup_parts(side)) or "No change that can affect the result."
 
 
 def _claude_code_text(a: Analysis) -> str:
@@ -248,8 +237,7 @@ def _display_path(path: Path) -> str:
 def summary(a: Analysis, report_path: Path) -> List[str]:
     last = _titled("Report", _display_path(report_path))
     if a.status != "ok":
-        text = _status_text(a) + _counts(a)
-        return [_titled("Verdict", text[:1].upper() + text[1:] + "."), last]
+        return [_titled("Verdict", _no_verdict_text(a)), last]
     return [
         _titled("Verdict", _verdict_text(a)),
         _titled("Model mistakes", _mistakes_text(a)),
@@ -331,10 +319,9 @@ def _header(a: Analysis) -> str:
 
 def _verdict_panel(a: Analysis) -> str:
     if a.status != "ok":
-        text = _status_text(a) + _counts(a)
-        return ('<section class="verdict">%s<p class="verdict-text">%s.</p></section>'
-                % (_status("neutral", "No verdict yet"), escape(text[:1].upper() + text[1:])))
-    kind, word = VERDICT_STATUS[a.verdict]
+        return ('<section class="verdict">%s<p class="verdict-text">%s</p></section>'
+                % (_status("neutral", "No verdict yet"), escape(_no_verdict_text(a))))
+    kind, word = VERDICTS[a.verdict][:2]
     detail = _verdict_detail(a)
     return ('<section class="verdict %s">%s<p class="verdict-text">%s</p>'
             '<p class="confidence"><strong>Confidence</strong> %s</p></section>'
@@ -348,8 +335,8 @@ def _category(title: str, status: str, text: str, visual: str = "") -> str:
 
 def _mistakes_status(a: Analysis) -> str:
     if a.verdict in WORSE:
-        return _status("critical" if a.verdict in ("slightly_worse", "clearly_worse") else "warning", "Higher")
-    if a.verdict in ("better", "leaning_better"):
+        return _status(VERDICTS[a.verdict][0], "Higher")
+    if a.verdict in BETTER:
         return _status("good", "Lower")
     return _status("good", "Same")
 
@@ -358,7 +345,8 @@ def _mistakes_visual(a: Analysis) -> str:
     """Two large figures and two plain bars on one shared scale."""
     b = a.boot
     widest = max(b.base_rate, b.recent_rate, 1.0)
-    rows = (("before", "Before", b.base_rate, b.n_base), ("now", "Now", b.recent_rate, b.n_recent))
+    rows = (("before", "Before", b.base_rate, b.k_base, b.n_base),
+            ("now", "Now", b.recent_rate, b.k_recent, b.n_recent))
     figures = ('<div class="figures"><div><span class="figure">%s</span><span class="caption">Before</span></div>'
                '<span class="arrow" aria-hidden="true">→</span>'
                '<div><span class="figure now">%s</span><span class="caption">Now</span></div></div>'
@@ -366,16 +354,16 @@ def _mistakes_visual(a: Analysis) -> str:
     bars = "".join('<div class="bar-row"><span class="caption">%s</span><span class="bar-track">'
                    '<span class="bar %s" style="width:%.1f%%" data-tip="%s: %d of %d prompts"></span>'
                    '</span></div>'
-                   % (label, kind, max(100 * rate / widest, 1.5), label, _hits(rate, n), n)
-                   for kind, label, rate, n in rows)
+                   % (label, kind, max(100 * rate / widest, 1.5), label, k, n)
+                   for kind, label, rate, k, n in rows)
     return figures + '<div class="bars">%s</div>' % bars
 
 
 def _behavior_status(a: Analysis) -> str:
-    moved = _moved(a.signals)
-    if any(r.lo > 1 for r in moved):
+    directions = {r.direction for r in a.signals}
+    if "up" in directions:
         return _status("warning", "Higher")
-    if moved:
+    if "down" in directions:
         return _status("good", "Lower")
     return _status("good", "Same")
 
@@ -387,9 +375,9 @@ def _signal_values(r: SignalResult) -> str:
 
 
 def _signal_tag(r: SignalResult) -> str:
-    if r.lo > 1:
+    if r.direction == "up":
         return '<span class="tag warning">↑ %.1f×</span>' % r.ratio
-    if r.hi < 1:
+    if r.direction == "down":
         return '<span class="tag good">↓ %.1f×</span>' % r.ratio
     return '<span class="tag neutral">Same</span>'
 
@@ -397,12 +385,12 @@ def _signal_tag(r: SignalResult) -> str:
 def _signal_rows(results: List[SignalResult]) -> str:
     return '<ul class="signals">%s</ul>' % "".join(
         '<li class="signal-row"><span><strong>%s</strong><span class="caption">%s</span></span>%s</li>'
-        % (escape(r.signal.name[:1].upper() + r.signal.name[1:]), escape(_signal_values(r)), _signal_tag(r))
+        % (escape(_cap(r.signal.name)), escape(_signal_values(r)), _signal_tag(r))
         for r in results) if results else ""
 
 
 def _setup_status(a: Analysis) -> str:
-    return _status("good", "Same") if _setup_text(a.side).startswith("No change") else _status("warning", "Changed")
+    return _status("warning", "Changed") if _setup_parts(a.side) else _status("good", "Same")
 
 
 def _claude_code_status(a: Analysis) -> str:
@@ -417,8 +405,7 @@ def _categories(a: Analysis) -> str:
     if a.status != "ok":
         return ""
     b = a.boot
-    counts = "%d of %d prompts before, %d of %d now." % (
-        _hits(b.base_rate, b.n_base), b.n_base, _hits(b.recent_rate, b.n_recent), b.n_recent)
+    counts = "%d of %d prompts before, %d of %d now." % (b.k_base, b.n_base, b.k_recent, b.n_recent)
     return '<section class="categories">%s%s%s%s</section>' % (
         _category("Model mistakes", _mistakes_status(a), counts, _mistakes_visual(a)),
         _category("Agent behavior", _behavior_status(a), _behavior_text(a), _signal_rows(a.signals)),
@@ -480,12 +467,12 @@ def _numbers(a: Analysis) -> str:
         return ""
     out = ['<details><summary>All numbers</summary>']
     b = a.boot
-    if not _both_zero(b):
+    if b.k_base or b.k_recent:
         out.append('<p>Model mistakes: %s, 90%% interval %s to %s (%s).</p>'
                    % (_times(b.ratio), _times(b.ratio_lo), _times(b.ratio_hi), _pts(b.diff)))
     if a.shared_verdict:
         out.append('<p>Your project mix changed. On projects that appear in both windows, the verdict is %s; '
-                   'on all projects, it is %s.</p>' % (VERDICT_TEXT[a.shared_verdict], VERDICT_TEXT[a.verdict]))
+                   'on all projects, it is %s.</p>' % (VERDICTS[a.shared_verdict][2], VERDICTS[a.verdict][2]))
     if a.signals:
         out.append('<h3>Agent behavior</h3><table><thead><tr><th></th><th>Before</th><th>Now</th>'
                    '<th>Change, 90%% range</th></tr></thead><tbody>%s</tbody></table>'
@@ -499,16 +486,15 @@ def _numbers(a: Analysis) -> str:
                    % "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>'
                              % (label, cell(a.side["base"], short), cell(a.side["recent"], short))
                              for label, cell in SIDE_ROWS))
-    changes = [h for h in a.harness if h.get("affects_behavior") == "yes"]
-    if changes:
+    if a.harness:
         out.append('<h3>Claude Code changes that can change model quality</h3><dl>%s</dl>'
                    % "".join("<dt>%s</dt><dd>%s<span>%s</span></dd>"
-                             % (escape(h["version"]), escape(h["line"]), escape(h["reason"])) for h in changes))
+                             % (escape(h["version"]), escape(h["line"]), escape(h["reason"])) for h in a.harness))
     if a.compare is not None:
         c = a.compare
         out.append('<h3>Against %s</h3><p>Less controlled: different weeks. Verdict: %s. %s: %s of %d prompts. '
                    '%s: %s of %d prompts.</p>'
-                   % (escape(model_name(a.prev_model)), VERDICT_TEXT[a.compare_verdict],
+                   % (escape(model_name(a.prev_model)), VERDICTS[a.compare_verdict][2],
                       escape(model_name(a.prev_model)), _pct(c.base_rate), c.n_base,
                       escape(model_name(a.model)), _pct(c.recent_rate), c.n_recent))
     out.append("</details>")

@@ -37,11 +37,11 @@ def fixture(status: str = "ok") -> Analysis:
     return Analysis(
         status=status, model="claude-opus-5-5", prev_model="claude-opus-5-4",
         base=base, recent=recent,
-        boot=BootResult(diff=6.2, lo=1.1, hi=11.0, p_worse=0.78, base_rate=9.1, recent_rate=15.3,
+        boot=BootResult(diff=6.2, lo=1.1, hi=11.0, p_worse=0.78, base_rate=9.1, recent_rate=15.3, k_base=15, k_recent=26,
                         n_base=160, n_recent=170, s_base=24, s_recent=26,
                         ratio=1.7, ratio_lo=1.1, ratio_hi=2.6),
         verdict="slightly_worse", shared_verdict="leaning_worse",
-        compare=BootResult(diff=-1.0, lo=-6.0, hi=4.0, p_worse=0.35, base_rate=16.3, recent_rate=15.3,
+        compare=BootResult(diff=-1.0, lo=-6.0, hi=4.0, p_worse=0.35, base_rate=16.3, recent_rate=15.3, k_base=23, k_recent=26,
                            n_base=140, n_recent=170, s_base=22, s_recent=26,
                            ratio=0.94, ratio_lo=0.6, ratio_hi=1.3),
         compare_verdict="leaning_better",
@@ -54,9 +54,7 @@ def fixture(status: str = "ok") -> Analysis:
               "recent": _side(2, ["2.1.285", "2.1.289"],
                               [(DIR + "is-it-nerfed", 0.55), (DIR + "ai-team-journey-analyzer", 0.45)], 240)},
         harness=[{"id": "h1", "version": "2.1.285", "line": "Changed the default effort to medium",
-                  "affects_behavior": "yes", "reason": "Lower effort can mean shorter reasoning."},
-                 {"id": "h2", "version": "2.1.280", "line": "Fixed a typo in /help",
-                  "affects_behavior": "no", "reason": "Text only."}],
+                  "affects_behavior": "yes", "reason": "Lower effort can mean shorter reasoning."}],
         receipts={"base": [{"date": "2026-09-12", "quote": "no, use the existing helper",
                             "reason": "The agent wrote a new helper."}],
                   "recent": [{"date": "2026-09-30", "quote": "you ignored the test I asked for",
@@ -226,7 +224,7 @@ class RenderTest(unittest.TestCase):
                       'Other models do not count.</p>', out)
 
     def test_render_header_without_model_asks_generic_question(self):
-        out = report.render(Analysis(status="no_model"))
+        out = report.render(Analysis(status="too_early"))
         self.assertIn("<title>Is your model nerfed?</title>", out)
         self.assertIn("<h1>Is your model nerfed?</h1>", out)
 
@@ -263,7 +261,6 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("<details open", out)
         self.assertIn("Less controlled: different weeks", out)
         self.assertIn("Changed the default effort to medium", out)
-        self.assertNotIn("Fixed a typo in /help", out)
 
     def test_render_is_light_only(self):
         out = report.render(fixture())
@@ -275,10 +272,10 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("\u2014", out)
         self.assertNotIn("\u2013", out)
 
-    def test_render_hides_the_ratio_when_both_rates_round_to_zero(self):
+    def test_render_hides_the_ratio_when_no_prompt_has_a_mistake(self):
         a = fixture()
         a.verdict = "no_change"
-        a.boot.base_rate, a.boot.recent_rate = 0.2, 0.3
+        a.boot.k_base = a.boot.k_recent = 0
         out = report.render(a)
         self.assertNotIn("90% interval ×", out)
 

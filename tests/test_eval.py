@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 
-import parse
+from tests import make_prompt
 
 EVAL = Path(__file__).resolve().parent.parent / "eval"
 sys.path.insert(0, str(EVAL))
@@ -15,8 +14,7 @@ import score  # noqa: E402
 
 
 def prompt(uuid, text, after_interrupt=False, history=()):
-    return parse.Prompt(uuid, "s", "p", datetime(2026, 1, 1, tzinfo=timezone.utc), text, "m", "1.0.0",
-                        False, False, after_interrupt, "", list(history))
+    return make_prompt(uuid, text=text, after_interrupt=after_interrupt, history=list(history))
 
 
 class KappaTest(unittest.TestCase):
@@ -32,14 +30,6 @@ class KappaTest(unittest.TestCase):
     def test_kappa_one_class(self):
         self.assertEqual(score.cohen_kappa(["a", "a"], ["a", "a"]), 1.0)
         self.assertEqual(score.cohen_kappa(["a", "a"], ["b", "b"]), 0.0)
-
-    def test_precision_recall(self):
-        gold = ["m", "m", "u", "u"]
-        pred = ["m", "u", "m", "u"]
-        self.assertEqual(score.precision_recall(gold, pred, "m"), (0.5, 0.5))
-
-    def test_precision_recall_no_positive(self):
-        self.assertEqual(score.precision_recall(["u"], ["u"], "m"), (0.0, 0.0))
 
 
 class AgreementTest(unittest.TestCase):

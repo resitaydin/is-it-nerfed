@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import random
-from typing import List, Tuple
+from typing import List
 
-SessionCount = Tuple[str, int, int]
+from stats import SessionCount
 CONCENTRATION = 20
 
 

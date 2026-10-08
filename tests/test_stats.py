@@ -4,9 +4,9 @@ import unittest
 from datetime import date, timedelta
 
 import stats
+from analyze import FIRM_WORSE as WORSE
 from tests.synth import make_counts
 
-WORSE = ("slightly_worse", "clearly_worse")
 LEANING = ("leaning_worse", "leaning_better", "unclear")
 
 
@@ -16,7 +16,7 @@ def days(n):
 
 
 def result(lo, hi, diff=0.0, p_worse=0.5, sessions=10, ratio=1.0, ratio_lo=0.5, ratio_hi=2.0):
-    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 100, 100, sessions, sessions,
+    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 10, 10, 100, 100, sessions, sessions,
                             ratio, ratio_lo, ratio_hi)
 
 
@@ -157,13 +157,10 @@ class CalibrationTest(unittest.TestCase):
         v = self.verdicts(0.035, 0.035, n_sessions=100)
         self.assertLessEqual(self.share(v, ("leaning_worse", "leaning_better")), 0.45)
 
-    def test_doubling_is_not_called_no_change(self):
-        v = self.verdicts(0.035, 0.07, n_sessions=100)
-        self.assertLessEqual(self.share(v, ("no_change",)), 0.05)
-
-    def test_planted_nerf_power(self):
+    def test_planted_doubling(self):
         v = self.verdicts(0.035, 0.07, n_sessions=100)
         self.assertGreaterEqual(self.share(v, WORSE), 0.70)
+        self.assertLessEqual(self.share(v, ("no_change",)), 0.05)
 
 
 if __name__ == "__main__":

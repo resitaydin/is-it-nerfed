@@ -41,6 +41,8 @@ class BootResult:
     p_worse: float
     base_rate: float
     recent_rate: float
+    k_base: int
+    k_recent: int
     n_base: int
     n_recent: int
     s_base: int
@@ -50,9 +52,20 @@ class BootResult:
     ratio_hi: float
 
 
+def totals(counts: List[SessionCount]) -> Tuple[int, int]:
+    """Hits and prompts summed over sessions."""
+    return sum(c[1] for c in counts), sum(c[2] for c in counts)
+
+
 def rate(counts: List[SessionCount]) -> float:
-    total = sum(c[2] for c in counts)
-    return 100.0 * sum(c[1] for c in counts) / total if total else 0.0
+    hits, total = totals(counts)
+    return 100.0 * hits / total if total else 0.0
+
+
+def _interval(ordered: List[float]) -> Tuple[float, float]:
+    """The 5th and 95th percentiles of sorted values: a 90% interval."""
+    n = len(ordered)
+    return ordered[int(0.05 * n)], ordered[min(n - 1, int(0.95 * n))]
 
 
 def _ratio(hits_base: int, n_base: int, hits_recent: int, n_recent: int) -> float:
@@ -77,35 +90,40 @@ def cluster_bootstrap(base: List[SessionCount], recent: List[SessionCount],
     Rates are in percentage points. Sessions without labeled prompts are left out.
     """
     rng = random.Random(seed)
-    sides = [[(c[2], _binomial_cdf(c[1], c[2])) for c in side if c[2] > 0] for side in (base, recent)]
+    # Per labeled session: prompts, hits, and the cumulative probabilities for a resampled hit count.
+    # A session with no hits, or only hits, always resamples to the same count, so it needs no draw.
+    sides = [[(c[2], c[1], None if c[1] in (0, c[2]) else _binomial_cdf(c[1], c[2])) for c in side if c[2] > 0]
+             for side in (base, recent)]
     diffs, ratios = [], []
     for _ in range(n):
         drawn = []
         for side in sides:
             pick = rng.choices(side, k=len(side))
-            total = sum(m for m, _ in pick)
-            hits = sum(min(m, bisect.bisect_right(cdf, rng.random())) for m, cdf in pick)
+            total = sum(m for m, _, _ in pick)
+            hits = sum(k if cdf is None else min(m, bisect.bisect_right(cdf, rng.random())) for m, k, cdf in pick)
             drawn.append((hits, total))
         (hb, nb), (hr, nr) = drawn
         diffs.append((100.0 * hr / nr if nr else 0.0) - (100.0 * hb / nb if nb else 0.0))
         ratios.append(_ratio(hb, nb, hr, nr))
-    diffs.sort()
-    ratios.sort()
-    totals = [(sum(c[1] for c in side), sum(c[2] for c in side)) for side in (base, recent)]
+    (k_base, n_base), (k_recent, n_recent) = totals(base), totals(recent)
+    lo, hi = _interval(sorted(diffs))
+    ratio_lo, ratio_hi = _interval(sorted(ratios))
     return BootResult(
         diff=rate(recent) - rate(base),
-        lo=diffs[int(0.05 * n)],
-        hi=diffs[min(n - 1, int(0.95 * n))],
+        lo=lo,
+        hi=hi,
         p_worse=sum(d > 0 for d in diffs) / n,
         base_rate=rate(base),
         recent_rate=rate(recent),
-        n_base=sum(c[2] for c in base),
-        n_recent=sum(c[2] for c in recent),
+        k_base=k_base,
+        k_recent=k_recent,
+        n_base=n_base,
+        n_recent=n_recent,
         s_base=len(sides[0]),
         s_recent=len(sides[1]),
-        ratio=_ratio(*totals[0], *totals[1]),
-        ratio_lo=ratios[int(0.05 * n)],
-        ratio_hi=ratios[min(n - 1, int(0.95 * n))],
+        ratio=_ratio(k_base, n_base, k_recent, n_recent),
+        ratio_lo=ratio_lo,
+        ratio_hi=ratio_hi,
     )
 
 
@@ -113,13 +131,9 @@ def ratio_bootstrap(base: List[SessionCount], recent: List[SessionCount],
                     n: int = 2000, seed: int = 0) -> Tuple[float, float, float]:
     """Rate ratio with a 90% interval from resampling sessions only, for counts with no upper bound."""
     rng = random.Random(seed)
-
-    def totals(side: List[SessionCount]) -> Tuple[int, int]:
-        return sum(c[1] for c in side), sum(c[2] for c in side)
-
     ratios = sorted(_ratio(*totals(rng.choices(base, k=len(base))), *totals(rng.choices(recent, k=len(recent))))
                     for _ in range(n))
-    return _ratio(*totals(base), *totals(recent)), ratios[int(0.05 * n)], ratios[min(n - 1, int(0.95 * n))]
+    return (_ratio(*totals(base), *totals(recent)),) + _interval(ratios)
 
 
 def verdict(r: BootResult) -> str:

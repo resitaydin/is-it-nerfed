@@ -34,6 +34,11 @@ def valid(label: dict, item: dict) -> bool:
             and bool(_norm(evidence)) and _norm(evidence) in item_text(item))
 
 
+def valid_interp(row: dict) -> bool:
+    """An interpret label: whether a changelog line can change model behavior, with a short text for it."""
+    return row.get("affects_behavior") in ("yes", "no") and isinstance(row.get("short"), str) and bool(row["short"])
+
+
 def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[str, dict], List[str]]:
     found: Dict[str, dict] = {}
     for path in paths:

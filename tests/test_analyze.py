@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 import analyze
 import parse
 from overlay import Incident
+from tests import make_prompt
 
 TODAY = date(2026, 10, 4)
 OPUS5 = "claude-opus-5-5"
@@ -18,13 +19,10 @@ def day_n(i: int, start: date = date(2026, 8, 1)) -> date:
 
 def make_session(sid, day, model, project="p1", n=2, version="2.1.0", **kw):
     when = datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
-    prompts = [
-        parse.Prompt(uuid="%s-%d" % (sid, i), session_id=sid, project=project, timestamp=when,
-                     text="text %d" % i, model=model, cli_version=version, is_first=i == 0,
-                     is_command=False, after_interrupt=False, prev_agent_text="", history=[])
-        for i in range(n)
-    ]
-    return parse.Session(session_id=sid, project=project, prompts=prompts, cli_versions=[version], **kw)
+    prompts = [make_prompt("%s-%d" % (sid, i), session_id=sid, project=project, timestamp=when,
+                           text="text %d" % i, model=model, cli_version=version, is_first=i == 0)
+               for i in range(n)]
+    return parse.Session(session_id=sid, project=project, prompts=prompts, **kw)
 
 
 def label(steer: bool) -> dict:
@@ -47,7 +45,7 @@ def days_sessions(count, model=OPUS5, start=date(2026, 8, 1), **kw):
 
 def run(sessions, labels, **kw):
     args = dict(interp={}, incidents=[], version_dates={}, baselines={}, judge_agreement=None,
-                overlay_ok=True, today=TODAY, model=OPUS5)
+                overlay_ok=True, model=OPUS5)
     args.update(kw)
     return analyze.run(sessions, labels, **args)
 
@@ -78,25 +76,25 @@ class HelperTests(unittest.TestCase):
         rows = analyze.daily(sessions, OPUS5, labels)
         self.assertEqual(rows, [(day_n(0), 1, 2), (day_n(1), 1, 2), (day_n(2), 0, 0)])
 
-    def test_attribution_groups_by_version_and_prefers_short_text(self):
+    def test_attribution_groups_by_version(self):
         recent = (date(2026, 9, 1), date(2026, 9, 14))
         harness = [
             {"id": "a", "version": "2.2.0", "line": "Changed default effort to low", "short": "default effort lowered",
              "affects_behavior": "yes", "reason": ""},
-            {"id": "d", "version": "2.2.0", "line": "Changed compaction", "affects_behavior": "yes", "reason": ""},
-            {"id": "b", "version": "2.2.1", "line": "Fix typo", "affects_behavior": "no", "reason": ""},
-            {"id": "c", "version": "2.0.0", "line": "Old", "affects_behavior": "yes", "reason": ""},
+            {"id": "d", "version": "2.2.0", "line": "Changed compaction", "short": "compaction changed",
+             "affects_behavior": "yes", "reason": ""},
+            {"id": "c", "version": "2.0.0", "line": "Old", "short": "old", "affects_behavior": "yes", "reason": ""},
         ]
         vd = {"2.2.0": date(2026, 9, 3), "2.2.1": date(2026, 9, 4), "2.0.0": date(2026, 8, 1)}
         at = lambda d: datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
         incidents = [
-            Incident("Degraded performance on Opus", "minor", at(date(2026, 9, 10)), None, ["Claude Code"]),
-            Incident("Degraded performance", "minor", at(date(2026, 9, 10)), at(date(2026, 9, 11)), ["API"]),
-            Incident("Login errors", "minor", at(date(2026, 9, 10)), at(date(2026, 9, 11)), ["Claude Code"]),
-            Incident("Degraded performance", "minor", at(date(2026, 8, 1)), at(date(2026, 8, 2)), ["Claude Code"]),
+            Incident("Degraded performance on Opus", at(date(2026, 9, 10)), None, ["Claude Code"]),
+            Incident("Degraded performance", at(date(2026, 9, 10)), at(date(2026, 9, 11)), ["API"]),
+            Incident("Login errors", at(date(2026, 9, 10)), at(date(2026, 9, 11)), ["Claude Code"]),
+            Incident("Degraded performance", at(date(2026, 8, 1)), at(date(2026, 8, 2)), ["Claude Code"]),
         ]
         lines = analyze.attribution(recent, harness, vd, incidents)
-        self.assertEqual(lines, ["2.2.0: default effort lowered; Changed compaction",
+        self.assertEqual(lines, ["2.2.0: default effort lowered; compaction changed",
                                  "incident: Degraded performance on Opus"])
 
 
@@ -127,18 +125,12 @@ class VersionOrderTests(unittest.TestCase):
 
 
 class RunTests(unittest.TestCase):
-    def test_no_model(self):
-        old = days_sessions(5, start=date(2026, 6, 1))
-        analysis, _ = run(old, {}, model=None)
-        self.assertEqual(analysis.status, "no_model")
-        self.assertIsNone(analysis.model)
-
     def test_no_labels_status(self):
         sessions = days_sessions(30)
         analysis, saved = run(sessions, {})
         self.assertEqual(analysis.status, "no_labels")
-        self.assertEqual(analysis.verdict, "")
-        self.assertEqual(analysis.boot.n_recent, 0)
+        self.assertIsNone(analysis.verdict)
+        self.assertIsNone(analysis.boot)
         self.assertEqual(saved, {})
 
     def test_too_early_status(self):
@@ -154,8 +146,9 @@ class RunTests(unittest.TestCase):
         sessions = days_sessions(10)
         analysis, _ = run(sessions, labels_for(sessions, lambda d: False), judge_agreement=0.7, model=OPUS5)
         self.assertEqual(analysis.status, "judge_drift")
-        self.assertEqual(analysis.verdict, "")
-        self.assertIsNotNone(analysis.boot)
+        self.assertIsNone(analysis.verdict)
+        self.assertIsNone(analysis.boot)
+        self.assertEqual(analysis.receipts, {})
 
     def test_ok_worse_with_receipts_and_compare(self):
         prev = days_sessions(6, OPUS4, start=date(2026, 6, 1))
@@ -183,8 +176,8 @@ class RunTests(unittest.TestCase):
             late = when.date() >= day_n(10)
             s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["interrupt"] * (6 if late else 1)]
         confirmed, _ = run(sessions, labels)
-        self.assertIn(confirmed.verdict, ("slightly_worse", "clearly_worse"))
-        self.assertTrue(confirmed.signals[0].lo > 1)
+        self.assertIn(confirmed.verdict, analyze.FIRM_WORSE)
+        self.assertEqual(confirmed.signals[0].direction, "up")
 
     def test_compare_needs_ok_status_and_labels_on_both_sides(self):
         prev = days_sessions(6, OPUS4, start=date(2026, 6, 1))
@@ -243,12 +236,13 @@ class RunTests(unittest.TestCase):
         labels = labels_for(sessions, lambda d: False)
         vd = {"2.1.0": day_n(0), "2.2.0": day_n(8), "1.0.0": day_n(-50)}
         interp = {
-            "x": {"id": "x", "version": "2.2.0", "line": "effort", "affects_behavior": "yes", "reason": "r"},
-            "y": {"id": "y", "version": "1.0.0", "line": "old", "affects_behavior": "yes", "reason": "r"},
+            "x": {"id": "x", "version": "2.2.0", "line": "effort", "short": "e", "affects_behavior": "yes", "reason": "r"},
+            "y": {"id": "y", "version": "1.0.0", "line": "old", "short": "o", "affects_behavior": "yes", "reason": "r"},
+            "z": {"id": "z", "version": "2.2.0", "line": "typo", "short": "t", "affects_behavior": "no", "reason": "r"},
         }
         at = datetime(2026, 8, 5, tzinfo=timezone.utc)
-        incidents = [Incident("Outage", "major", at, at, ["Claude Code"]),
-                     Incident("API blip", "major", at, at, ["API"])]
+        incidents = [Incident("Outage", at, at, ["Claude Code"]),
+                     Incident("API blip", at, at, ["API"])]
         analysis, _ = run(sessions, labels, interp=interp, version_dates=vd, incidents=incidents)
         self.assertEqual([h["id"] for h in analysis.harness], ["x"])
         kinds = [(m[1], m[2]) for m in analysis.markers]

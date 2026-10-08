@@ -64,7 +64,6 @@ class ParseSessionTest(unittest.TestCase):
         self.assertEqual(second.history, ["Fix the login bug"])
         self.assertEqual(third.history[0], "No, use the other file")
         self.assertEqual(second.cli_version, "2.1.281")
-        self.assertEqual(self.basic.cli_versions, ["2.1.280", "2.1.281"])
         self.assertEqual(first.timestamp.isoformat(), "2026-09-01T10:00:01+00:00")
 
     def test_model_per_prompt(self):

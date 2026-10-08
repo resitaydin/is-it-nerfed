@@ -59,7 +59,6 @@ class Session:
     project: str
     prompts: List[Prompt] = field(default_factory=list)
     claude_md_files: Dict[str, str] = field(default_factory=dict)
-    cli_versions: List[str] = field(default_factory=list)
     tool_results: int = 0
     tool_errors: int = 0
     events: List[Event] = field(default_factory=list)
@@ -92,41 +91,45 @@ def load_sessions(roots: List[Path]) -> List[Session]:
 
 
 def parse_session(path: Path) -> Session:
+    """A session that this tool ran in is marked is_own; its parse stops at the first sign of it."""
     session = Session(session_id=path.stem, project=path.parent.name)
     state = _State()
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if OWN_DATA_DIR in raw:
-            session.is_own = True
-        try:
-            line = json.loads(raw)
-        except ValueError:
-            continue
-        if not isinstance(line, dict) or line.get("isSidechain"):
-            continue
-        version = line.get("version")
-        if version and version not in session.cli_versions:
-            session.cli_versions.append(version)
-        kind = line.get("type")
-        if kind == "user":
-            _read_user(line, session, state)
-        elif kind == "assistant":
-            _read_assistant(line, session, state)
-        elif kind == "system" and line.get("subtype") == "compact_boundary":
-            session.compactions += 1
-        elif kind == "attachment" and not session.claude_md_files:
-            session.claude_md_files = _claude_md_files(line.get("attachment"))
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            if OWN_DATA_DIR in raw:
+                session.is_own = True
+                return session
+            _read_line(raw, session, state)
     if any(OWN_COMMAND in p.text for p in session.prompts):
         session.is_own = True
     return session
 
 
+def _read_line(raw: str, session: Session, state: _State) -> None:
+    try:
+        line = json.loads(raw)
+    except ValueError:
+        return
+    if not isinstance(line, dict) or line.get("isSidechain"):
+        return
+    kind = line.get("type")
+    if kind == "user":
+        _read_user(line, session, state)
+    elif kind == "assistant":
+        _read_assistant(line, session, state)
+    elif kind == "system" and line.get("subtype") == "compact_boundary":
+        session.compactions += 1
+    elif kind == "attachment" and not session.claude_md_files:
+        session.claude_md_files = _claude_md_files(line.get("attachment"))
+
+
 @dataclass
 class _State:
-    last_prompt: Optional[Prompt] = None
     agent_id: Optional[str] = None
     agent_text: str = ""
     seen_message_ids: set = field(default_factory=set)
     seen_tool_ids: set = field(default_factory=set)
+    tool_paths: set = field(default_factory=set)  # exact file paths named by earlier tool calls
     tool_inputs: List[str] = field(default_factory=list)
     model: Optional[str] = None
     interrupted: bool = False
@@ -147,7 +150,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
     if text is None:
         return
     if text.startswith(INTERRUPT_PREFIX):
-        session.events.append(Event(_parse_time(line.get("timestamp", "")), state.model, "interrupt"))
+        session.events.append(Event(parse_time(line.get("timestamp", "")), state.model, "interrupt"))
         state.interrupted = True
         return
     if text.startswith(SYSTEM_PREFIXES):
@@ -156,7 +159,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         uuid=line.get("uuid", ""),
         session_id=session.session_id,
         project=session.project,
-        timestamp=_parse_time(line.get("timestamp", "")),
+        timestamp=parse_time(line.get("timestamp", "")),
         text=text,
         model=None,
         cli_version=line.get("version", ""),
@@ -167,7 +170,6 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         history=[p.text for p in reversed(session.prompts)],
     )
     state.interrupted = False
-    state.last_prompt = prompt
     session.prompts.append(prompt)
 
 
@@ -188,9 +190,9 @@ def _read_assistant(line: dict, session: Session, state: _State) -> None:
     if isinstance(content, list):
         text = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
         state.agent_text += text
-        _read_behavior(content, text, _parse_time(line.get("timestamp", "")), model, session, state)
+        _read_behavior(content, text, parse_time(line.get("timestamp", "")), model, session, state)
     state.model = model or state.model
-    prompt = state.last_prompt
+    prompt = session.prompts[-1] if session.prompts else None
     if prompt is not None and prompt.model is None and model:
         prompt.model = model
 
@@ -208,8 +210,9 @@ def _read_behavior(content: list, text: str, when: datetime, model: Optional[str
         if block.get("name") in EDIT_TOOLS:
             kinds.append("edit")
             path = str(tool_input.get("file_path", ""))
-            if path and not any(path in seen for seen in state.tool_inputs):
+            if path and path not in state.tool_paths and not any(path in seen for seen in reversed(state.tool_inputs)):
                 kinds.append("blind_edit")
+        state.tool_paths.update(str(v) for v in tool_input.values() if isinstance(v, str))
         state.tool_inputs.append(json.dumps(tool_input))
     session.events += [Event(when, model, kind) for kind in kinds]
 
@@ -234,7 +237,7 @@ def _claude_md_files(attachment: Any) -> Dict[str, str]:
     }
 
 
-def _parse_time(value: str) -> datetime:
+def parse_time(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:

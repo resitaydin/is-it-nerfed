@@ -10,6 +10,7 @@ from typing import Dict, List, Set
 
 import jsonl
 import parse
+import stats
 from stats import Window
 
 REPLY_MAX = 1500
@@ -35,21 +36,20 @@ def eligible(p: parse.Prompt) -> bool:
 
 
 def select(prompts: List[parse.Prompt], window: Window, cap: int = 200,
-           seed: int = 0, skip: Set[str] = frozenset()) -> List[parse.Prompt]:
+           skip: Set[str] = frozenset()) -> List[parse.Prompt]:
     """Pick up to cap eligible prompts in the window, one per day in turn.
 
     Prompts in skip are already labeled: they are not picked, and they count against the cap.
     """
-    start, end = window
     by_day: Dict[object, List[parse.Prompt]] = defaultdict(list)
     for p in prompts:
-        if not start <= p.timestamp.date() <= end:
+        if not stats.in_window(p.timestamp.date(), window):
             continue
         if p.uuid in skip:
             cap -= 1
         elif eligible(p):
             by_day[p.timestamp.date()].append(p)
-    rng = random.Random(seed)
+    rng = random.Random(0)
     queues = []
     for day in sorted(by_day):
         day_prompts = sorted(by_day[day], key=lambda p: p.uuid)
@@ -99,11 +99,11 @@ def build_item(p: parse.Prompt) -> dict:
 
 
 def write_batches(items: List[dict], anchors: List[dict], out_dir: Path,
-                  batch_size: int = 40, seed: int = 0) -> List[Path]:
+                  batch_size: int = 40) -> List[Path]:
     """Shuffle items and anchors together and write batch-NNN.jsonl files."""
     hidden = [dict({k: a[k] for k in ANCHOR_KEYS}, id=anchor_item_id(a)) for a in anchors]
     rows = list(items) + hidden
-    random.Random(seed).shuffle(rows)
+    random.Random(0).shuffle(rows)
     paths = []
     for n, start in enumerate(range(0, len(rows), batch_size), 1):
         paths.append(out_dir / ("batch-%03d.jsonl" % n))

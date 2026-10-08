@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import parse
 import stats
@@ -11,7 +11,6 @@ from stats import SessionCount, Window
 
 @dataclass(frozen=True)
 class Signal:
-    key: str
     name: str
     label: str
     kind: str  # the event counted
@@ -21,9 +20,9 @@ class Signal:
 
 # Pre-declared from the March 2026 regression (anthropics/claude-code#42796), where each moved 3-6x.
 SIGNALS = (
-    Signal("blind_edits", "blind edits", "Edits of a file no earlier tool call named (%)", "blind_edit", "edit", 100),
-    Signal("interrupts", "interrupts", "Interrupts per 1,000 tool calls", "interrupt", "tool", 1000),
-    Signal("self_corrections", "self-corrections", "Self-corrections per 1,000 tool calls", "self_correction", "tool", 1000),
+    Signal("blind edits", "Edits of a file no earlier tool call named (%)", "blind_edit", "edit", 100),
+    Signal("interrupts", "Interrupts per 1,000 tool calls", "interrupt", "tool", 1000),
+    Signal("self-corrections", "Self-corrections per 1,000 tool calls", "self_correction", "tool", 1000),
 )
 
 
@@ -35,6 +34,15 @@ class SignalResult:
     ratio: float
     lo: float
     hi: float
+
+    @property
+    def direction(self) -> Optional[str]:
+        """"up" or "down" when the 90% interval of the ratio excludes 1, else None."""
+        if self.lo > 1:
+            return "up"
+        if self.hi < 1:
+            return "down"
+        return None
 
 
 def session_counts(sessions: List[parse.Session], model: str, window: Window,
@@ -60,4 +68,4 @@ def compare(sessions: List[parse.Session], model: str, base: Window, recent: Win
 
 
 def confirms_worse(results: List[SignalResult]) -> bool:
-    return any(r.lo > 1 for r in results)
+    return any(r.direction == "up" for r in results)

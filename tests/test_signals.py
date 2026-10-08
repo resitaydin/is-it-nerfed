@@ -37,7 +37,7 @@ class CompareTest(unittest.TestCase):
         base = [session("b%d" % i, date(2026, 9, 1 + i), calls(100, 1)) for i in range(10)]
         recent = [session("r%d" % i, date(2026, 9, 15 + i), calls(100, 6)) for i in range(10)]
         results = signals.compare(base + recent, OPUS5, BASE, RECENT)
-        self.assertEqual([r.signal.key for r in results], ["interrupts", "self_corrections"])
+        self.assertEqual([r.signal.name for r in results], ["interrupts", "self-corrections"])
         r = results[0]
         self.assertAlmostEqual(r.base_rate, 10.0)
         self.assertAlmostEqual(r.recent_rate, 60.0)

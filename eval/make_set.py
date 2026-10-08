@@ -36,8 +36,13 @@ def is_model_hint(p: parse.Prompt) -> bool:
     text = p.text.strip().lower()
     if MODEL_HINT.search(text):
         return True
-    return len(text) >= REPEAT_MIN_CHARS and any(
-        difflib.SequenceMatcher(None, text, h.strip().lower()).ratio() >= REPEAT_RATIO for h in p.history[:3])
+    return len(text) >= REPEAT_MIN_CHARS and any(_similar(text, h.strip().lower()) for h in p.history[:3])
+
+
+def _similar(a: str, b: str) -> bool:
+    """The quick ratios are upper bounds of the full ratio, so they skip most pairs cheaply."""
+    m = difflib.SequenceMatcher(None, a, b)
+    return m.real_quick_ratio() >= REPEAT_RATIO and m.quick_ratio() >= REPEAT_RATIO and m.ratio() >= REPEAT_RATIO
 
 
 def pick_hints(prompts: List[parse.Prompt], n: int, seed: int, skip: Set[str]) -> List[parse.Prompt]:

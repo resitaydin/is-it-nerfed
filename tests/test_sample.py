@@ -3,23 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
-import parse
 import sample
-
-
-def make_prompt(uuid="u", day=1, **kw):
-    fields = dict(
-        uuid=uuid, session_id="s", project="p",
-        timestamp=datetime(2026, 9, day, 10, 0, tzinfo=timezone.utc),
-        text="hello", model=None, cli_version="2.1.0",
-        is_first=False, is_command=False, after_interrupt=False,
-        prev_agent_text="", history=[],
-    )
-    fields.update(kw)
-    return parse.Prompt(**fields)
+from tests import make_prompt
 
 
 class SelectTest(unittest.TestCase):

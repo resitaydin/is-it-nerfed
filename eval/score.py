@@ -51,13 +51,6 @@ def kappa_interval(a: list, b: list, runs: int = 2000, seed: int = 1) -> Tuple[f
     return kappas[int(0.025 * runs)], kappas[int(0.975 * runs) - 1]
 
 
-def precision_recall(gold: list, pred: list, positive) -> Tuple[float, float]:
-    hits = sum(g == positive and p == positive for g, p in zip(gold, pred))
-    predicted = sum(p == positive for p in pred)
-    actual = sum(g == positive for g in gold)
-    return (hits / predicted if predicted else 0.0, hits / actual if actual else 0.0)
-
-
 def score(gold_rows: List[dict], pred_rows: List[dict]) -> Dict[str, float]:
     gold = {r["id"]: r for r in gold_rows}
     pred = {r["id"]: r for r in pred_rows}
@@ -67,7 +60,6 @@ def score(gold_rows: List[dict], pred_rows: List[dict]) -> Dict[str, float]:
     tp = sum(x and y for x, y in zip(g, p))
     fp = sum(y and not x for x, y in zip(g, p))
     fn = sum(x and not y for x, y in zip(g, p))
-    precision, recall = precision_recall(g, p, True)
     negatives = len(g) - sum(g)
     steering = [i for i in common if gold[i]["kind"] == "steering"]
     return {
@@ -75,8 +67,8 @@ def score(gold_rows: List[dict], pred_rows: List[dict]) -> Dict[str, float]:
         "skipped": len(set(gold) | set(pred)) - len(common),
         "positives": sum(g),
         "tp": tp, "fp": fp, "fn": fn,
-        "precision": precision,
-        "recall": recall,
+        "precision": tp / (tp + fp) if tp + fp else 0.0,
+        "recall": tp / (tp + fn) if tp + fn else 0.0,
         "false_alarm_rate": fp / negatives if negatives else 0.0,
         "kappa_model": cohen_kappa(g, p),
         "kappa_model_ci": kappa_interval(g, p),

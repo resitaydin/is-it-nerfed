@@ -7,6 +7,7 @@ from pathlib import Path
 import overlay
 import parse
 import sample
+from tests import make_prompt
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -15,13 +16,8 @@ def make_session(*prompts):
     return parse.Session(session_id="s", project="p", prompts=list(prompts))
 
 
-def make_prompt(day, version):
-    return parse.Prompt(
-        uuid="u%d%s" % (day, version), session_id="s", project="p",
-        timestamp=datetime(2026, 9, day, 10, 0, tzinfo=timezone.utc),
-        text="hi", model=None, cli_version=version, is_first=False,
-        is_command=False, after_interrupt=False, prev_agent_text="", history=[],
-    )
+def version_prompt(day, version):
+    return make_prompt("u%d%s" % (day, version), day=day, cli_version=version)
 
 
 class ChangelogTest(unittest.TestCase):
@@ -51,7 +47,6 @@ class IncidentTest(unittest.TestCase):
         self.assertEqual(len(incidents), 2)
         self.assertEqual(incidents[0].start, datetime(2026, 10, 1, 16, 20, 40, 767000, tzinfo=timezone.utc))
         self.assertEqual(incidents[0].end, datetime(2026, 10, 1, 18, 5, 10, tzinfo=timezone.utc))
-        self.assertEqual(incidents[0].impact, "major")
         self.assertEqual(incidents[0].components, ["Claude Code", "Claude API"])
         self.assertEqual(incidents[1].start, datetime(2026, 10, 3, 9, 0, tzinfo=timezone.utc))
         self.assertIsNone(incidents[1].end)
@@ -69,8 +64,8 @@ class FetchTest(unittest.TestCase):
 class VersionFirstSeenTest(unittest.TestCase):
     def test_version_first_seen(self):
         sessions = [
-            make_session(make_prompt(5, "2.1.2"), make_prompt(3, "2.1.1")),
-            make_session(make_prompt(2, "2.1.1")),
+            make_session(version_prompt(5, "2.1.2"), version_prompt(3, "2.1.1")),
+            make_session(version_prompt(2, "2.1.1")),
         ]
         self.assertEqual(
             overlay.version_first_seen(sessions),
@@ -78,7 +73,7 @@ class VersionFirstSeenTest(unittest.TestCase):
         )
 
     def test_version_first_seen_skips_empty_version(self):
-        sessions = [make_session(make_prompt(2, ""), make_prompt(3, "2.1.1"))]
+        sessions = [make_session(version_prompt(2, ""), version_prompt(3, "2.1.1"))]
         self.assertEqual(overlay.version_first_seen(sessions), {"2.1.1": date(2026, 9, 3)})
 
 

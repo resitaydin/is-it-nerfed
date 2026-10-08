@@ -16,7 +16,6 @@ KEYWORDS = re.compile(r"effort|thinking|system prompt|compact|default model|cont
 @dataclass
 class Incident:
     name: str
-    impact: str
     start: datetime
     end: Optional[datetime]
     components: List[str]
@@ -63,10 +62,6 @@ def version_first_seen(sessions: List[parse.Session]) -> Dict[str, date]:
     return first
 
 
-def _parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
 def parse_incidents(text: str) -> List[Incident]:
     try:
         data = json.loads(text)
@@ -77,9 +72,8 @@ def parse_incidents(text: str) -> List[Incident]:
         resolved = raw.get("resolved_at")
         incidents.append(Incident(
             name=raw["name"],
-            impact=raw["impact"],
-            start=_parse_time(raw.get("started_at") or raw["created_at"]),
-            end=_parse_time(resolved) if resolved else None,
+            start=parse.parse_time(raw.get("started_at") or raw["created_at"]),
+            end=parse.parse_time(resolved) if resolved else None,
             components=[c["name"] for c in raw.get("components") or []],
         ))
     return incidents

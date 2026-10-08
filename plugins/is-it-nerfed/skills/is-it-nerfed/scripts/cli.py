@@ -17,6 +17,7 @@ import overlay
 import parse
 import report
 import sample
+import stats
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 CHANGELOG_URL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
@@ -59,10 +60,6 @@ def _anchors() -> List[dict]:
     return jsonl.read(SKILL_DIR / "anchors.jsonl")
 
 
-def _iso(window) -> Optional[List[str]]:
-    return [d.isoformat() for d in window] if window else None
-
-
 def _batch_items(paths: Paths) -> Dict[str, dict]:
     items: Dict[str, dict] = {}
     for path in sorted(paths.to_label.glob("*.jsonl")):
@@ -72,17 +69,18 @@ def _batch_items(paths: Paths) -> Dict[str, dict]:
 
 
 def _interp_cache(paths: Paths) -> Dict[str, dict]:
-    return {r["id"]: r for r in reversed(jsonl.read(paths.interp_cache))}
+    return {r["id"]: r for r in jsonl.read(paths.interp_cache) if labels_mod.valid_interp(r)}
 
 
 def _fetch_overlay(paths: Paths, sessions: List[parse.Session], windows: list) -> Optional[List[dict]]:
     """Save the incidents, and return the uncached changelog lines; None when a fetch fails."""
-    changelog, incidents = overlay.fetch(CHANGELOG_URL), overlay.fetch(INCIDENTS_URL)
-    if changelog is None or incidents is None:
+    changelog = overlay.fetch(CHANGELOG_URL)
+    incidents = overlay.fetch(INCIDENTS_URL) if changelog is not None else None
+    if incidents is None:
         return None
     paths.incidents.write_text(incidents, encoding="utf-8")
     first_seen = overlay.version_first_seen(sessions)
-    versions = [v for v, day in first_seen.items() if any(w[0] <= day <= w[1] for w in windows)]
+    versions = [v for v, day in first_seen.items() if any(stats.in_window(day, w) for w in windows)]
     lines = overlay.relevant_lines(overlay.parse_changelog(changelog), versions)
     cached = _interp_cache(paths)
     return [line for line in lines if line["id"] not in cached]
@@ -109,11 +107,10 @@ def scan(args: argparse.Namespace) -> int:
         result["status"] = "no_model" if model is None else "too_early"
         return _emit(result) or 0
     prev = analyze.previous_model(sessions, model)
-    prev_win = analyze.prev_window(sessions, prev) if prev else None
     cached = set(labels_mod.load_cache(paths.labels_cache))
-    prompts = {m: [p for s in sessions for p in s.prompts if p.model == m] for m in (model, prev)}
-    picked = {p.uuid: p for window, m in zip((*windows, prev_win), (model, model, prev)) if window
-              for p in sample.select(prompts[m], window, skip=cached)}
+    targets = [(model, w) for w in windows] + ([(prev, analyze.prev_window(sessions, prev))] if prev else [])
+    picked = {p.uuid: p for m, window in targets
+              for p in sample.select(analyze.model_prompts(sessions, m), window, skip=cached)}
     items = [sample.build_item(p) for p in picked.values()]
     anchors = _anchors() if items else []
     batches = sample.write_batches(items, anchors, paths.to_label)
@@ -122,7 +119,6 @@ def scan(args: argparse.Namespace) -> int:
         jsonl.write(paths.to_interpret, interpret)
     _write_json(paths.plan, {
         "model": model, "today": today.isoformat(), "overlay_ok": interpret is not None,
-        "windows": {"base": _iso(windows[0]), "recent": _iso(windows[1]), "prev": _iso(prev_win)},
         "items": {sample.item_id(u): u for u in picked}})
     lines = interpret or []
     result.update(prompts_to_label=len(items), batches=[str(b) for b in batches],
@@ -139,8 +135,7 @@ def _merge_interp(paths: Paths) -> Dict[str, dict]:
     cache = _interp_cache(paths)
     for row in jsonl.read(paths.interp_labels):
         item = asked.get(row.get("id"))
-        if (item is None or item["id"] in cache or row.get("affects_behavior") not in ("yes", "no")
-                or not row.get("short")):
+        if item is None or item["id"] in cache or not labels_mod.valid_interp(row):
             continue
         cache[item["id"]] = {"id": item["id"], "version": item["version"], "line": item["line"],
                              "affects_behavior": row["affects_behavior"], "reason": row.get("reason", ""),
@@ -180,8 +175,7 @@ def report_cmd(args: argparse.Namespace) -> int:
     incidents = overlay.parse_incidents(paths.incidents.read_text(encoding="utf-8")) if paths.incidents.exists() else []
     analysis, baselines = analyze.run(
         sessions, cache, _merge_interp(paths), incidents, overlay.version_first_seen(sessions),
-        _read_json(paths.baselines, {}), judge.get("agreement"), plan["overlay_ok"], today,
-        model=plan["model"])
+        _read_json(paths.baselines, {}), judge.get("agreement"), plan["overlay_ok"], plan["model"])
     _write_json(paths.baselines, baselines)
     out = paths.data / ("report-%s.html" % today.isoformat())
     out.write_text(report.render(analysis), encoding="utf-8")
