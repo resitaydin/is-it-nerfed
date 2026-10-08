@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import json
 import os
 import random
 import re
@@ -14,6 +13,7 @@ from typing import List, Set, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent
                        / "plugins/is-it-nerfed/skills/is-it-nerfed/scripts"))
 
+import jsonl  # noqa: E402
 import parse  # noqa: E402
 import sample  # noqa: E402
 
@@ -74,18 +74,17 @@ def main(argv: List[str]) -> int:
     sessions = parse.load_sessions(parse.find_roots(Path.home(), os.environ))
     prompts = [p for s in sessions for p in s.prompts]
     if args.hints_only:
-        skip = {json.loads(line)["uuid"] for line in args.hints_only.read_text().splitlines() if line.strip()}
+        skip = {r["uuid"] for r in jsonl.read(args.hints_only)}
         picked = pick_hints(prompts, args.n, args.seed, skip)
         pool = len(picked)
     else:
         picked, pool = pick(prompts, args.n, args.seed)
         random.Random(args.seed).shuffle(picked)
-    args.out.mkdir(parents=True, exist_ok=True)
     items = [sample.build_item(p) for p in picked]
     keys = [{"id": i["id"], "uuid": p.uuid, "model": p.model, "date": p.timestamp.date().isoformat()}
             for i, p in zip(items, picked)]
     for name, rows in (("items.jsonl", items), ("key.jsonl", keys)):
-        (args.out / name).write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        jsonl.write(args.out / name, rows)
     print("wrote %d items (%d from the steering-candidate pool) to %s" % (len(items), pool, args.out))
     return 0
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import analyze
+import jsonl
 import labels as labels_mod
 import overlay
 import parse
@@ -50,18 +51,12 @@ def _write_json(path: Path, data) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _write_jsonl(path: Path, rows: List[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-
-
 def _emit(data: dict) -> None:
     print(json.dumps(data))
 
 
 def _anchors() -> List[dict]:
-    text = (SKILL_DIR / "anchors.jsonl").read_text(encoding="utf-8")
-    return [json.loads(line) for line in text.splitlines()]
+    return jsonl.read(SKILL_DIR / "anchors.jsonl")
 
 
 def _iso(window) -> Optional[List[str]]:
@@ -71,17 +66,13 @@ def _iso(window) -> Optional[List[str]]:
 def _batch_items(paths: Paths) -> Dict[str, dict]:
     items: Dict[str, dict] = {}
     for path in sorted(paths.to_label.glob("*.jsonl")):
-        for row in labels_mod.read_jsonl(path):
+        for row in jsonl.read(path):
             items.setdefault(row["id"], row)
     return items
 
 
 def _interp_cache(paths: Paths) -> Dict[str, dict]:
-    cache: Dict[str, dict] = {}
-    for row in labels_mod.read_jsonl(paths.interp_cache):
-        if row.get("short"):  # rows from before the short text are judged again
-            cache.setdefault(row["id"], row)
-    return cache
+    return {r["id"]: r for r in reversed(jsonl.read(paths.interp_cache))}
 
 
 def _fetch_overlay(paths: Paths, sessions: List[parse.Session], windows: list) -> Optional[List[dict]]:
@@ -128,7 +119,7 @@ def scan(args: argparse.Namespace) -> int:
     batches = sample.write_batches(items, anchors, paths.to_label)
     interpret = None if args.offline else _fetch_overlay(paths, sessions, list(windows))
     if interpret:
-        _write_jsonl(paths.to_interpret, interpret)
+        jsonl.write(paths.to_interpret, interpret)
     _write_json(paths.plan, {
         "model": model, "today": today.isoformat(), "overlay_ok": interpret is not None,
         "windows": {"base": _iso(windows[0]), "recent": _iso(windows[1]), "prev": _iso(prev_win)},
@@ -143,10 +134,10 @@ def scan(args: argparse.Namespace) -> int:
 
 
 def _merge_interp(paths: Paths) -> Dict[str, dict]:
-    asked = {r["id"]: r for r in labels_mod.read_jsonl(paths.to_interpret)}
+    asked = {r["id"]: r for r in jsonl.read(paths.to_interpret)}
     new = []
     cache = _interp_cache(paths)
-    for row in labels_mod.read_jsonl(paths.interp_labels):
+    for row in jsonl.read(paths.interp_labels):
         item = asked.get(row.get("id"))
         if (item is None or item["id"] in cache or row.get("affects_behavior") not in ("yes", "no")
                 or not row.get("short")):
@@ -155,7 +146,7 @@ def _merge_interp(paths: Paths) -> Dict[str, dict]:
                              "affects_behavior": row["affects_behavior"], "reason": row.get("reason", ""),
                              "short": row["short"]}
         new.append(cache[item["id"]])
-    labels_mod.append_cache(paths.interp_cache, new)
+    jsonl.append(paths.interp_cache, new)
     return cache
 
 
@@ -170,7 +161,7 @@ def report_cmd(args: argparse.Namespace) -> int:
     found, missing = labels_mod.read_labels(sorted(paths.labels_dir.glob("*.jsonl")), items)
     if missing and not args.final:
         retry = paths.to_label / "retry-001.jsonl"
-        _write_jsonl(retry, [items[i] for i in missing])
+        jsonl.write(retry, [items[i] for i in missing])
         _emit({"status": "retry", "batches": [str(retry)]})
         return EXIT_RETRY
     if missing:
@@ -183,7 +174,7 @@ def report_cmd(args: argparse.Namespace) -> int:
     cache = labels_mod.load_cache(paths.labels_cache)
     new = [{"uuid": plan["items"][i], **label} for i, label in found.items()
            if i in plan["items"] and plan["items"][i] not in cache]
-    labels_mod.append_cache(paths.labels_cache, new)
+    jsonl.append(paths.labels_cache, new)
     cache.update({r["uuid"]: r for r in new})
     sessions = parse.load_sessions(parse.find_roots(Path.home(), os.environ))
     incidents = overlay.parse_incidents(paths.incidents.read_text(encoding="utf-8")) if paths.incidents.exists() else []

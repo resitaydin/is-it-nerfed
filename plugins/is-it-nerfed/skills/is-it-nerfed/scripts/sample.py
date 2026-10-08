@@ -8,6 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Set
 
+import jsonl
 import parse
 from stats import Window
 
@@ -74,6 +75,10 @@ def item_id(key: str) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
 
 
+def anchor_item_id(anchor: dict) -> str:
+    return item_id("anchor-" + anchor["anchor_id"])
+
+
 def build_item(p: parse.Prompt) -> dict:
     earlier: List[str] = []
     total = 0
@@ -96,17 +101,13 @@ def build_item(p: parse.Prompt) -> dict:
 def write_batches(items: List[dict], anchors: List[dict], out_dir: Path,
                   batch_size: int = 40, seed: int = 0) -> List[Path]:
     """Shuffle items and anchors together and write batch-NNN.jsonl files."""
-    hidden = [dict({k: a[k] for k in ANCHOR_KEYS}, id=item_id("anchor-" + a["anchor_id"]))
-              for a in anchors]
+    hidden = [dict({k: a[k] for k in ANCHOR_KEYS}, id=anchor_item_id(a)) for a in anchors]
     rows = list(items) + hidden
     random.Random(seed).shuffle(rows)
-    out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for n, start in enumerate(range(0, len(rows), batch_size), 1):
-        path = out_dir / ("batch-%03d.jsonl" % n)
-        path.write_text("".join(json.dumps(r) + "\n" for r in rows[start:start + batch_size]),
-                        encoding="utf-8")
-        paths.append(path)
+        paths.append(out_dir / ("batch-%03d.jsonl" % n))
+        jsonl.write(paths[-1], rows[start:start + batch_size])
     return paths
 
 

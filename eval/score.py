@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent
                        / "plugins/is-it-nerfed/skills/is-it-nerfed/scripts"))
 
+import jsonl  # noqa: E402
 import labels  # noqa: E402
 
 # The verdict counts only model-caused steering, so the gate scores only that label.
@@ -99,7 +100,7 @@ def main(argv: List[str]) -> int:
     parser.add_argument("gold", type=Path)
     parser.add_argument("pred", type=Path)
     args = parser.parse_args(argv)
-    result = score(labels.read_jsonl(args.gold), labels.read_jsonl(args.pred))
+    result = score(jsonl.read(args.gold), jsonl.read(args.pred))
     print("scored %d items, skipped %d (id in only one file)" % (result["common"], result["skipped"]))
     print("model-caused steering: %d reference positives, tp %d, fp %d, fn %d"
           % (result["positives"], result["tp"], result["fp"], result["fn"]))

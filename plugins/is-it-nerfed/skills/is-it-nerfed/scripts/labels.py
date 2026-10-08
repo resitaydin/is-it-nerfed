@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import jsonl
 import sample
 
 KINDS = {"new_work", "steering", "other"}
@@ -34,24 +34,10 @@ def valid(label: dict, item: dict) -> bool:
             and bool(_norm(evidence)) and _norm(evidence) in item_text(item))
 
 
-def read_jsonl(path: Path) -> List[dict]:
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
-
-
 def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[str, dict], List[str]]:
     found: Dict[str, dict] = {}
     for path in paths:
-        for label in read_jsonl(path):
+        for label in jsonl.read(path):
             label_id = label.get("id")
             if not isinstance(label_id, str) or label_id in found:
                 continue
@@ -62,14 +48,7 @@ def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[s
 
 
 def load_cache(path: Path) -> Dict[str, dict]:
-    return {r["uuid"]: r for r in read_jsonl(path) if "uuid" in r}
-
-
-def append_cache(path: Path, records: List[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        for record in records:
-            f.write(json.dumps(record) + "\n")
+    return {r["uuid"]: r for r in jsonl.read(path) if "uuid" in r}
 
 
 def is_model_steering(label: dict) -> bool:
@@ -83,7 +62,7 @@ def anchor_agreement(labels_by_id: Dict[str, dict], anchors: List[dict]) -> Opti
 
     None when fewer than MIN_ANCHORS anchors have a label.
     """
-    ids = [(a, sample.item_id("anchor-" + a["anchor_id"])) for a in anchors]
+    ids = [(a, sample.anchor_item_id(a)) for a in anchors]
     labeled = [(a, labels_by_id[i]) for a, i in ids if i in labels_by_id]
     if len(labeled) < MIN_ANCHORS:
         return None

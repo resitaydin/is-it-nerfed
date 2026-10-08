@@ -13,6 +13,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
+import jsonl
+import sample
 from tests import SCRIPTS
 
 CLI = SCRIPTS / "cli.py"
@@ -65,12 +67,10 @@ class CliTest(unittest.TestCase):
         return json.loads(result.stdout)
 
     def batch_items(self, scan: dict) -> list:
-        return [json.loads(l) for p in scan["batches"] for l in Path(p).read_text().splitlines()]
+        return [row for p in scan["batches"] for row in jsonl.read(Path(p))]
 
     def write_labels(self, scan: dict, skip: int = 0) -> None:
-        gold = {json.loads(l)["anchor_id"]: json.loads(l) for l in ANCHORS.read_text().splitlines()}
-        import sample
-        gold_by_id = {sample.item_id("anchor-" + k): v for k, v in gold.items()}
+        gold_by_id = {sample.anchor_item_id(a): a for a in jsonl.read(ANCHORS)}
         labels = []
         for item in self.batch_items(scan):
             anchor = gold_by_id.get(item["id"])
@@ -162,7 +162,6 @@ class CliTest(unittest.TestCase):
 
     def test_estimate_includes_interpret_batch(self):
         import overlay
-        import sample
         day9 = self.home / ".claude" / "projects" / "-proj" / "day9.jsonl"
         day9.write_text(day9.read_text().replace("2.1.280", "2.1.290"))
         offline = self.scan_in_process("--offline")
@@ -172,18 +171,9 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(overlay, "fetch", fake):
             online = self.scan_in_process()
         self.assertEqual(online["interpret_items"], 1)
-        rows = [json.loads(l) for l in Path(online["interpret_batch"]).read_text().splitlines()]
+        rows = jsonl.read(Path(online["interpret_batch"]))
         extra = sample.estimate_tokens(rows, 1)
         self.assertEqual(online["estimated_tokens"], offline["estimated_tokens"] + extra)
-
-    def test_interp_cache_drops_rows_without_short_text(self):
-        import cli
-        paths = cli.Paths(str(self.home / "data"))
-        paths.interp_cache.parent.mkdir(parents=True)
-        rows = [{"id": "old", "version": "1", "line": "x", "affects_behavior": "yes", "reason": ""},
-                {"id": "new", "version": "1", "line": "y", "affects_behavior": "no", "reason": "", "short": "y"}]
-        paths.interp_cache.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        self.assertEqual(list(cli._interp_cache(paths)), ["new"])
 
     def test_merge_interp_skips_rows_without_short_text(self):
         import cli

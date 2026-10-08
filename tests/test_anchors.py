@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 import unittest
 from collections import Counter
 
+import jsonl
 import labels
 import sample
 from tests import SCRIPTS
@@ -12,11 +12,11 @@ ANCHORS_PATH = SCRIPTS.parent / "anchors.jsonl"
 
 
 def load_anchors():
-    return [json.loads(line) for line in ANCHORS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return jsonl.read(ANCHORS_PATH)
 
 
 def perfect_labels(anchors):
-    return {sample.item_id("anchor-" + a["anchor_id"]): {"kind": a["gold_kind"], "cause": a["gold_cause"]}
+    return {sample.anchor_item_id(a): {"kind": a["gold_kind"], "cause": a["gold_cause"]}
             for a in anchors}
 
 
@@ -50,7 +50,7 @@ class AnchorSetTest(unittest.TestCase):
         good = perfect_labels(anchors)
         self.assertEqual(labels.anchor_agreement(good, anchors), 1.0)
         flipped = dict(good)
-        model_ids = [sample.item_id("anchor-" + a["anchor_id"]) for a in anchors
+        model_ids = [sample.anchor_item_id(a) for a in anchors
                      if a["gold_kind"] == "steering" and a["gold_cause"] == "model"]
         for key in model_ids[:7]:
             flipped[key] = dict(flipped[key], cause="unclear")
@@ -78,7 +78,7 @@ class AnchorSetTest(unittest.TestCase):
         labels_by_id = {}
         for a in anchors:
             model = a["gold_cause"] == "model"
-            labels_by_id[sample.item_id("anchor-" + a["anchor_id"])] = (
+            labels_by_id[sample.anchor_item_id(a)] = (
                 {"kind": "steering", "cause": "user"} if model
                 else {"kind": "other" if a["gold_kind"] == "new_work" else "steering", "cause": "unclear"})
         self.assertEqual(labels.anchor_agreement(labels_by_id, anchors), 0.5)

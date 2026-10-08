@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import jsonl
 import labels
 
 ITEM = {"id": "a", "prompt": "No, use the  other file", "previous_agent_reply": "I edited x.py",
@@ -74,8 +75,8 @@ class CacheTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cache" / "labels.jsonl"
             self.assertEqual(labels.load_cache(path), {})
-            labels.append_cache(path, [{"uuid": "u1", "kind": "other"}])
-            labels.append_cache(path, [{"uuid": "u2", "kind": "steering"}])
+            jsonl.append(path, [{"uuid": "u1", "kind": "other"}])
+            jsonl.append(path, [{"uuid": "u2", "kind": "steering"}])
             path.write_text(path.read_text() + "{truncated")
             self.assertEqual(set(labels.load_cache(path)), {"u1", "u2"})
 
