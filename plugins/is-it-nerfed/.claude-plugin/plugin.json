@@ -4,5 +4,9 @@
   "description": "Checks your own Claude Code session logs to tell if your model got worse for you.",
   "author": {
     "name": "resitaydin"
-  }
+  },
+  "homepage": "https://github.com/resitaydin/is-it-nerfed",
+  "repository": "https://github.com/resitaydin/is-it-nerfed",
+  "license": "MIT",
+  "keywords": ["claude", "claude-code", "nerf", "model-quality", "regression"]
 }
