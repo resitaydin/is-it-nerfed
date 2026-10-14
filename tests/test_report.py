@@ -226,8 +226,13 @@ class RenderTest(unittest.TestCase):
         out = report.render(fixture())
         self.assertIn("<title>Is Opus 5.5 nerfed?</title>", out)
         self.assertIn('<p class="product">Model drift report</p><h1>Is Opus 5.5 nerfed?</h1>', out)
-        self.assertIn('<p class="meta">Compares your Opus 5.5 prompts before (Sep 7-20) with now (Sep 21-Oct 4). '
-                      'Other models do not count.</p>', out)
+        self.assertIn('<strong>Before</strong> Sep 7-20</span>', out)
+        self.assertIn('<strong>Now</strong> Sep 21-Oct 4</span>', out)
+
+    def test_render_verdict_shows_confidence_level(self):
+        out = report.render(fixture())
+        self.assertIn('<strong>High confidence</strong> 330 prompts over 27 days.', out)
+        self.assertEqual(out.count('<i class="on">'), 3)
 
     def test_render_header_without_model_asks_generic_question(self):
         out = report.render(Analysis(status="too_early"))
@@ -253,7 +258,7 @@ class RenderTest(unittest.TestCase):
         self.assertIn("1.2 → 3.9 per 1,000 tool calls", out)
         self.assertIn("8.0% → 9.1% of edits", out)
         self.assertIn(">↑ 3.2×<", out)
-        self.assertIn(">Same<", out)
+        self.assertIn(">Within noise<", out)
 
     def test_render_mistakes_as_figures_and_bars(self):
         out = report.render(fixture())
@@ -261,6 +266,25 @@ class RenderTest(unittest.TestCase):
         self.assertIn('<span class="figure">9%</span>', out)
         self.assertIn('<span class="figure now">15%</span>', out)
         self.assertEqual(out.count('class="bar '), 2)
+
+    def test_render_no_bars_when_no_prompt_has_a_mistake(self):
+        a = fixture()
+        a.boot.k_base = a.boot.k_recent = 0
+        a.boot.base_rate = a.boot.recent_rate = 0.0
+        out = report.render(a)
+        self.assertIn('<span class="figure now">0%</span>', out)
+        self.assertNotIn('class="bar ', out)
+
+    def test_render_legend_groups_versions_and_names_incidents(self):
+        out = report.render(fixture())
+        self.assertEqual(out.count('class="key version"'), 1)
+        self.assertIn('<span class="key version"></span>Claude Code update</li>', out)
+        self.assertIn('<span class="key incident"></span>Sep 29, Elevated errors on Claude Code</li>', out)
+        self.assertNotIn("CLI 2.1.280</li>", out)
+
+    def test_render_embeds_the_font(self):
+        out = report.render(fixture())
+        self.assertIn('src: url("data:font/woff2;base64,', out)
 
     def test_render_details_are_closed_and_hold_the_extras(self):
         out = report.render(fixture())
@@ -283,7 +307,8 @@ class RenderTest(unittest.TestCase):
         a.verdict = "no_change"
         a.boot.k_base = a.boot.k_recent = 0
         out = report.render(a)
-        self.assertNotIn("90% interval ×", out)
+        self.assertNotIn('class="stats"', out)
+        self.assertIn('class="stats"', report.render(fixture()))
 
     def test_render_escapes_html(self):
         a = fixture()
