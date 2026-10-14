@@ -17,7 +17,6 @@ from stats import BootResult, SessionCount, Window
 
 RECENT_DAYS = 7
 MIN_ACTIVE_DAYS = 3
-FREEZE_DAYS = 28
 PREV_WINDOW_DAYS = 14
 DRIFT_THRESHOLD = 0.8
 CLAUDE_CODE = "Claude Code"
@@ -86,13 +85,8 @@ def previous_model(sessions: List[parse.Session], model: str) -> Optional[str]:
     return best[1] if best else None
 
 
-def windows_for(sessions: List[parse.Session], model: str,
-                baselines: dict) -> Optional[Tuple[Window, Window]]:
-    windows = stats.make_windows(model_days(sessions, model))
-    saved = baselines.get(model)
-    if windows is None or saved is None:
-        return windows
-    return (date.fromisoformat(saved["start"]), date.fromisoformat(saved["end"])), windows[1]
+def windows_for(sessions: List[parse.Session], model: str) -> Optional[Tuple[Window, Window]]:
+    return stats.make_windows(model_days(sessions, model))
 
 
 def prev_window(sessions: List[parse.Session], prev_model_id: str) -> Window:
@@ -217,38 +211,24 @@ def _shared_verdict(sessions: List[parse.Session], base: List[SessionCount],
     return other if other != main else None
 
 
-def _base_counts(sessions: List[parse.Session], model: str, base: Window, labels: Dict[str, dict],
-                 baselines: dict) -> Tuple[List[SessionCount], Dict[str, List[SessionCount]]]:
-    """The base counts of steering and of each signal: the saved ones, or new ones from the logs.
-
-    The saved counts outlive the logs, which Claude Code deletes after 30 days by default."""
-    saved = baselines.get(model, {})
-    counts = ([tuple(c) for c in saved["sessions"]] if "sessions" in saved
-              else session_counts(sessions, model, base, labels))
-    signals = ({name: [tuple(c) for c in rows] for name, rows in saved["signals"].items()} if "signals" in saved
-               else signals_mod.window_counts(sessions, model, base))
-    return counts, signals
-
-
 def _shown(verdict: Optional[str], confirmed: bool) -> Optional[str]:
     """A firm "worse" needs a behavior signal that rose too."""
     return "unconfirmed_worse" if verdict in FIRM_WORSE and not confirmed else verdict
 
 
 def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str, dict],
-        incidents: List[overlay.Incident], version_dates: Dict[str, date], baselines: dict,
-        judge_agreement: Optional[float], overlay_ok: bool, model: str) -> Tuple[Analysis, dict]:
-    """The analysis, and the baselines to save: a base window is frozen once the model has FREEZE_DAYS days."""
+        incidents: List[overlay.Incident], version_dates: Dict[str, date],
+        judge_agreement: Optional[float], overlay_ok: bool, model: str) -> Analysis:
     out = Analysis(status="too_early", model=model, judge_agreement=judge_agreement, overlay_ok=overlay_ok)
     days = model_days(sessions, model)
-    windows = windows_for(sessions, model, baselines)
+    windows = windows_for(sessions, model)
     out.daily = daily(sessions, model, labels)
     out.markers = _markers(days, version_dates, incidents)
     if windows is None:
-        return out, baselines
+        return out
     base, recent = windows
     out.base, out.recent = base, recent
-    base_counts, base_signals = _base_counts(sessions, model, base, labels, baselines)
+    base_counts = session_counts(sessions, model, base, labels)
     recent_counts = session_counts(sessions, model, recent, labels)
     if not stats.totals(base_counts)[1] or not stats.totals(recent_counts)[1]:
         out.status = "no_labels"
@@ -257,9 +237,9 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     else:
         out.status = "ok"
     if out.status != "ok":
-        return out, baselines
+        return out
     out.boot = stats.cluster_bootstrap(base_counts, recent_counts)
-    out.signals = signals_mod.compare(base_signals, signals_mod.window_counts(sessions, model, recent))
+    out.signals = signals_mod.compare(*(signals_mod.window_counts(sessions, model, w) for w in windows))
     confirmed = signals_mod.confirms_worse(out.signals)
     verdict = stats.verdict(out.boot)
     out.verdict = _shown(verdict, confirmed)
@@ -277,15 +257,4 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     out.receipts = {"base": receipts(sessions, model, base, labels),
                     "recent": receipts(sessions, model, recent, labels)}
     out.attribution = attribution(recent, out.harness, version_dates, incidents)
-    signals = {name: [list(c) for c in counts] for name, counts in base_signals.items()}
-    saved = baselines.get(model)
-    if saved is None:
-        if len(days) < FREEZE_DAYS:
-            return out, baselines
-        frozen = {"start": base[0].isoformat(), "end": base[1].isoformat(),
-                  "sessions": [list(c) for c in base_counts], "signals": signals}
-        return out, {**baselines, model: frozen}
-    if "signals" not in saved and any(signals.values()):
-        # A baseline saved before the signals were frozen gets them while its logs remain.
-        return out, {**baselines, model: {**saved, "signals": signals}}
-    return out, baselines
+    return out

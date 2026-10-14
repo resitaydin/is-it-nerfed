@@ -45,7 +45,7 @@ def days_sessions(count, model=OPUS5, start=date(2026, 8, 1), **kw):
 
 
 def run(sessions, labels, **kw):
-    args = dict(interp={}, incidents=[], version_dates={}, baselines={}, judge_agreement=None,
+    args = dict(interp={}, incidents=[], version_dates={}, judge_agreement=None,
                 overlay_ok=True, model=OPUS5)
     args.update(kw)
     return analyze.run(sessions, labels, **args)
@@ -139,15 +139,14 @@ class SideChangesTest(unittest.TestCase):
 class RunTests(unittest.TestCase):
     def test_no_labels_status(self):
         sessions = days_sessions(30)
-        analysis, saved = run(sessions, {})
+        analysis = run(sessions, {})
         self.assertEqual(analysis.status, "no_labels")
         self.assertIsNone(analysis.verdict)
         self.assertIsNone(analysis.boot)
-        self.assertEqual(saved, {})
 
     def test_too_early_status(self):
         sessions = days_sessions(2, start=date(2026, 10, 1))
-        analysis, _ = run(sessions, {})
+        analysis = run(sessions, {})
         self.assertEqual(analysis.status, "too_early")
         self.assertEqual(analysis.model, OPUS5)
         self.assertIsNone(analysis.boot)
@@ -156,7 +155,7 @@ class RunTests(unittest.TestCase):
 
     def test_judge_drift_status(self):
         sessions = days_sessions(10)
-        analysis, _ = run(sessions, labels_for(sessions, lambda d: False), judge_agreement=0.7, model=OPUS5)
+        analysis = run(sessions, labels_for(sessions, lambda d: False), judge_agreement=0.7, model=OPUS5)
         self.assertEqual(analysis.status, "judge_drift")
         self.assertIsNone(analysis.verdict)
         self.assertIsNone(analysis.boot)
@@ -167,7 +166,7 @@ class RunTests(unittest.TestCase):
         cur = days_sessions(10, OPUS5, start=date(2026, 9, 20))
         sessions = prev + cur
         labels = labels_for(sessions, lambda d: d >= date(2026, 9, 25))
-        analysis, _ = run(sessions, labels, interp={}, model=OPUS5)
+        analysis = run(sessions, labels, interp={}, model=OPUS5)
         self.assertEqual(analysis.status, "ok")
         self.assertEqual(analysis.prev_model, OPUS4)
         self.assertGreater(analysis.boot.diff, 0)
@@ -180,20 +179,20 @@ class RunTests(unittest.TestCase):
     def test_firm_worse_needs_a_behavior_signal(self):
         sessions = days_sessions(20, n=8)
         labels = labels_for(sessions, lambda d: d >= day_n(10))
-        alone, _ = run(sessions, labels)
+        alone = run(sessions, labels)
         self.assertEqual(alone.signals, [])
         self.assertEqual(alone.verdict, "unconfirmed_worse")
         for s in sessions:
             when = s.prompts[0].timestamp
             late = when.date() >= day_n(10)
             s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["interrupt"] * (6 if late else 1)]
-        confirmed, _ = run(sessions, labels)
+        confirmed = run(sessions, labels)
         self.assertIn(confirmed.verdict, analyze.FIRM_WORSE)
         self.assertEqual(confirmed.signals[0].direction, "up")
 
     def test_shared_verdict_compares_the_verdict_before_the_downgrade(self):
         sessions = days_sessions(20, n=8)
-        analysis, _ = run(sessions, labels_for(sessions, lambda d: d >= day_n(10)))
+        analysis = run(sessions, labels_for(sessions, lambda d: d >= day_n(10)))
         self.assertEqual(analysis.verdict, "unconfirmed_worse")
         self.assertIsNone(analysis.shared_verdict)
 
@@ -201,67 +200,24 @@ class RunTests(unittest.TestCase):
         sessions = days_sessions(20, n=8)
         labels = labels_for(sessions, lambda d: d >= day_n(10))
         with mock.patch.object(analyze, "_shared_verdict", return_value="slightly_worse"):
-            analysis, _ = run(sessions, labels)
+            analysis = run(sessions, labels)
         self.assertEqual(analysis.verdict, "unconfirmed_worse")
         self.assertIsNone(analysis.shared_verdict)
-
-    def test_old_baseline_gets_the_signal_counts_while_the_logs_remain(self):
-        sessions = days_sessions(30, n=8)
-        for s in sessions:
-            s.events = [parse.Event(s.prompts[0].timestamp, OPUS5, k) for k in ["tool"] * 10 + ["interrupt"]]
-        labels = labels_for(sessions, lambda d: False)
-        _, saved = run(sessions, labels)
-        old = {OPUS5: {k: v for k, v in saved[OPUS5].items() if k != "signals"}}
-        _, again = run(sessions, labels, baselines=old)
-        self.assertEqual(again, saved)
-
-    def test_frozen_baseline_keeps_the_signal_counts(self):
-        sessions = days_sessions(40, n=8)
-        for s in sessions:
-            when = s.prompts[0].timestamp
-            late = when.date() >= day_n(26)
-            s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["interrupt"] * (6 if late else 1)]
-        labels = labels_for(sessions, lambda d: d >= day_n(26))
-        _, saved = run(sessions[:28], labels)
-        # The logs of the base window are gone; only the frozen counts remain.
-        later, _ = run(sessions[20:], labels, baselines=saved)
-        self.assertEqual([r.direction for r in later.signals][:1], ["up"])
-        self.assertIn(later.verdict, analyze.FIRM_WORSE)
 
     def test_compare_needs_ok_status_and_labels_on_both_sides(self):
         prev = days_sessions(6, OPUS4, start=date(2026, 6, 1))
         cur = days_sessions(10, OPUS5, start=date(2026, 9, 20))
         labels = labels_for(prev + cur, lambda d: d >= date(2026, 9, 25))
-        drift, _ = run(prev + cur, labels, judge_agreement=0.7)
+        drift = run(prev + cur, labels, judge_agreement=0.7)
         self.assertEqual(drift.status, "judge_drift")
         self.assertIsNone(drift.compare)
         self.assertIsNone(drift.compare_verdict)
         cur_only = {p.uuid: labels[p.uuid] for s in cur for p in s.prompts}
-        unlabeled_prev, _ = run(prev + cur, cur_only)
+        unlabeled_prev = run(prev + cur, cur_only)
         self.assertEqual(unlabeled_prev.status, "ok")
         self.assertEqual(unlabeled_prev.prev_model, OPUS4)
         self.assertIsNone(unlabeled_prev.compare)
         self.assertIsNone(unlabeled_prev.compare_verdict)
-
-    def test_baseline_frozen_at_28_days(self):
-        sessions = days_sessions(28)
-        labels = labels_for(sessions, lambda d: d < day_n(14))
-        analysis, saved = run(sessions, labels)
-        self.assertEqual(analysis.status, "ok")
-        entry = saved[OPUS5]
-        self.assertEqual(entry["start"], day_n(0).isoformat())
-        self.assertEqual(entry["end"], day_n(13).isoformat())
-        self.assertEqual(len(entry["sessions"]), 14)
-        self.assertEqual(entry["sessions"][0], ["%s-s0" % OPUS5, 1, 2])
-        # More days, old labels gone: the saved base is reused.
-        more = days_sessions(35)
-        new_labels = labels_for(more[14:], lambda d: False)
-        again, saved2 = run(more, new_labels, baselines=saved)
-        self.assertEqual(again.base, (day_n(0), day_n(13)))
-        self.assertEqual(again.boot.n_base, 28)
-        self.assertEqual(again.boot.base_rate, 50.0)
-        self.assertEqual(again.recent, (day_n(21), day_n(34)))
-        self.assertEqual(saved2, saved)
 
     def test_shared_projects_verdict_set_only_when_different(self):
         # Base has an extra project that steers on every prompt; the recent window lacks it.
@@ -270,13 +226,13 @@ class RunTests(unittest.TestCase):
         recent = [make_session("r%d" % i, day_n(5 + i % 5), OPUS5, project="shared") for i in range(10)]
         sessions = base + recent
         labels = {p.uuid: label(s.project == "old") for s in sessions for p in s.prompts}
-        analysis, _ = run(sessions, labels)
+        analysis = run(sessions, labels)
         self.assertNotEqual(analysis.verdict, "")
         self.assertIsNotNone(analysis.shared_verdict)
         self.assertNotEqual(analysis.shared_verdict, analysis.verdict)
 
         same = days_sessions(10, project="only")
-        analysis, _ = run(same, labels_for(same, lambda d: False))
+        analysis = run(same, labels_for(same, lambda d: False))
         self.assertIsNone(analysis.shared_verdict)
 
     def test_harness_and_markers(self):
@@ -292,7 +248,7 @@ class RunTests(unittest.TestCase):
         at = datetime(2026, 8, 5, tzinfo=timezone.utc)
         incidents = [Incident("Outage", at, at, ["Claude Code"]),
                      Incident("API blip", at, at, ["API"])]
-        analysis, _ = run(sessions, labels, interp=interp, version_dates=vd, incidents=incidents)
+        analysis = run(sessions, labels, interp=interp, version_dates=vd, incidents=incidents)
         self.assertEqual([h["id"] for h in analysis.harness], ["x"])
         kinds = [(m[1], m[2]) for m in analysis.markers]
         self.assertIn(("version", "2.2.0"), kinds)

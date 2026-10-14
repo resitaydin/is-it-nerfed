@@ -6,7 +6,7 @@ import random
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List
 
 import jsonl
 import parse
@@ -35,19 +35,13 @@ def eligible(p: parse.Prompt) -> bool:
     return not p.is_first and not p.is_command
 
 
-def select(prompts: List[parse.Prompt], window: Window, cap: int = 200,
-           skip: Set[str] = frozenset()) -> List[parse.Prompt]:
-    """Pick up to cap eligible prompts in the window, one per day in turn.
-
-    Prompts in skip are already labeled: they are not picked, and they count against the cap.
-    """
+def select(prompts: List[parse.Prompt], window: Window, cap: int = 200) -> List[parse.Prompt]:
+    """Pick up to cap eligible prompts in the window, one per day in turn."""
     by_day: Dict[object, List[parse.Prompt]] = defaultdict(list)
     for p in prompts:
         if not stats.in_window(p.timestamp.date(), window):
             continue
-        if p.uuid in skip:
-            cap -= 1
-        elif eligible(p):
+        if eligible(p):
             by_day[p.timestamp.date()].append(p)
     rng = random.Random(0)
     queues = []

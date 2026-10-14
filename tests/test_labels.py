@@ -70,15 +70,15 @@ class ReadLabelsTest(unittest.TestCase):
         self.assertEqual(missing, ["c"])
 
 
-class CacheTest(unittest.TestCase):
-    def test_cache_round_trip(self):
+class JsonlTest(unittest.TestCase):
+    def test_append_round_trip_skips_a_truncated_line(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cache" / "labels.jsonl"
-            self.assertEqual(labels.load_cache(path), {})
-            jsonl.append(path, [{"uuid": "u1", "kind": "other"}])
-            jsonl.append(path, [{"uuid": "u2", "kind": "steering"}])
+            path = Path(tmp) / "cache" / "interp.jsonl"
+            self.assertEqual(jsonl.read(path), [])
+            jsonl.append(path, [{"id": "u1"}])
+            jsonl.append(path, [{"id": "u2"}])
             path.write_text(path.read_text() + "{truncated")
-            self.assertEqual(set(labels.load_cache(path)), {"u1", "u2"})
+            self.assertEqual([r["id"] for r in jsonl.read(path)], ["u1", "u2"])
 
 
 if __name__ == "__main__":

@@ -52,10 +52,6 @@ def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[s
     return found, [i for i in items_by_id if i not in found]
 
 
-def load_cache(path: Path) -> Dict[str, dict]:
-    return {r["uuid"]: r for r in jsonl.read(path) if "uuid" in r}
-
-
 def is_model_steering(label: dict) -> bool:
     return label.get("kind") == "steering" and label.get("cause") == "model"
 

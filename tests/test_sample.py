@@ -21,13 +21,13 @@ class SelectTest(unittest.TestCase):
         again = sample.select(prompts, window, cap=200)
         self.assertEqual([p.uuid for p in picked], [p.uuid for p in again])
 
-    def test_select_skips_cached_and_ineligible(self):
+    def test_select_skips_ineligible(self):
         prompts = [
-            make_prompt("ok"), make_prompt("cached"),
+            make_prompt("ok"),
             make_prompt("first", is_first=True), make_prompt("cmd", is_command=True),
             make_prompt("late", day=20),
         ]
-        picked = sample.select(prompts, (date(2026, 9, 1), date(2026, 9, 10)), skip={"cached"})
+        picked = sample.select(prompts, (date(2026, 9, 1), date(2026, 9, 10)))
         self.assertEqual([p.uuid for p in picked], ["ok"])
 
 

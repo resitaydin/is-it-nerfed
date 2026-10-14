@@ -59,10 +59,10 @@ pass work through files in the data directory.
 /is-it-nerfed (SKILL.md)
   ├─ python3 nerf.py scan    → work/to_label/*.jsonl, work/to_interpret.jsonl, prints estimate
   ├─ Claude asks for consent, then Sonnet subagents → work/labels/*.jsonl
-  └─ python3 nerf.py report  → cache merge, anchor check, stats, HTML, terminal summary
+  └─ python3 nerf.py report  → anchor check, stats, HTML, terminal summary
 ```
 
-Data directory: `~/.claude/is-it-nerfed/` with `cache/labels.jsonl`, `cache/baselines.json`,
+Data directory: `~/.claude/is-it-nerfed/` with `cache/interp.jsonl` (changelog labels),
 `work/` (cleared on each scan), and `report-YYYY-MM-DD.html`.
 
 Python 3.9+ standard library only (tests use `unittest`). No install step, no build step.
@@ -102,8 +102,11 @@ Python 3.9+ standard library only (tests use `unittest`). No install step, no bu
 - Three windows: baseline and recent of the current model, and the last window of the
   previous model.
 - Up to 200 prompts per window, sampled at random and spread across days, with a fixed seed.
-- Labels are cached by prompt `uuid`. A later run labels only uncached prompts.
-- Expected first-run size: about 600 prompts, about 0.9M Sonnet tokens (about 1.4k per prompt).
+- Each run labels all three windows again, and no prompt label outlives the run. One judge then
+  labels both windows, so a new judge model or a change of the judge prompt cannot look like a
+  change of the model. A cache of labels would compare an old judge with a new one: a judge that
+  gives 1 more false alarm per 100 prompts gave "worse" or "leaning worse" in 34% of simulated runs.
+- Expected run size: up to 600 prompts, about 0.9M Sonnet tokens (about 1.4k per prompt).
 
 ### Input per item
 
@@ -165,8 +168,8 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
   amount of work. The read:edit ratio is left out: most reads go through
   Bash in auto mode, so it measures the workflow, not the model.
 - Windows: if the model has fewer than 28 active days, split its active days into a first and a
-  second half. Otherwise, the first 14 days against the last 14 days. When the model first reaches 28 active days, the baseline result
-  is saved to `cache/baselines.json` and reused.
+  second half. Otherwise, the first 14 days against the last 14 days. Both windows come from the
+  logs that remain, because both are labeled in the same run.
 - Uncertainty: 5,000 two-stage cluster-bootstrap resamples per window. Stage 1 resamples the
   labeled sessions with replacement. Stage 2 draws the model-caused count of each picked session
   from a binomial with that session's size and rate. Output: the difference (recent minus

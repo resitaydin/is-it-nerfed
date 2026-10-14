@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -96,10 +96,9 @@ class CliTest(unittest.TestCase):
         self.assertIn("Not enough data", lines[0])  # every real prompt is labeled "other"
         self.assertTrue(lines[-1].startswith("Report:"))
         self.assertTrue((self.data / ("report-%s.html" % TODAY)).exists())
-        self.assertTrue((self.data / "cache" / "labels.jsonl").exists())
-        self.assertTrue((self.data / "cache" / "baselines.json").exists())
-        judge = json.loads((self.data / "cache" / "judge.json").read_text())
-        self.assertEqual(judge, {"agreement": 1.0, "date": TODAY})
+        # One judge labels both windows in one run, so no label outlives the run.
+        for name in ("labels.jsonl", "baselines.json", "judge.json"):
+            self.assertFalse((self.data / "cache" / name).exists(), name)
 
     def test_report_retry_exit_code(self):
         scan = self.scan()
@@ -123,7 +122,6 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("no labeled prompts", result.stdout)
         self.assertNotIn("judge", result.stdout)
-        self.assertFalse((self.data / "cache" / "judge.json").exists())
 
     def test_no_logs_exit_2(self):
         empty = Path(self._tmp.name) / "empty"
@@ -134,42 +132,31 @@ class CliTest(unittest.TestCase):
         self.assertEqual(out["status"], "no_logs")
         self.assertIn("No session logs found in:", out["message"])
 
-    def test_labels_of_a_drifted_judge_are_not_cached(self):
+    def test_drifted_judge_gives_no_verdict(self):
         scan = self.scan()
         self.write_labels(scan, judge_ok=False)
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("anchor labels", result.stdout)
-        self.assertEqual(jsonl.read(self.data / "cache" / "labels.jsonl"), [])
 
-    def test_labels_without_a_judge_check_are_not_cached(self):
-        scan = self.scan()
-        self.write_labels(scan)
-        (self.data / "cache").mkdir(parents=True, exist_ok=True)
-        (self.data / "cache" / "judge.json").write_text('{"agreement": 1.0, "date": "x"}')
-        anchor_ids = {sample.anchor_item_id(a) for a in jsonl.read(ANCHORS)}
-        out = Path(scan["labels_dir"]) / "labels-001.jsonl"
-        jsonl.write(out, [l for l in jsonl.read(out) if l["id"] not in anchor_ids])
-        self.assertEqual(self.run_cli("report", "--final").returncode, 0)
-        self.assertEqual(jsonl.read(self.data / "cache" / "labels.jsonl"), [])
-
-    def test_second_scan_skips_cached(self):
+    def test_second_scan_labels_the_windows_again(self):
         scan = self.scan()
         self.write_labels(scan)
         self.assertEqual(self.run_cli("report", "--final").returncode, 0)
         again = self.scan()
-        self.assertEqual(again["status"], "ok")
-        self.assertEqual(again["prompts_to_label"], 0)
-        self.assertEqual(again["batches"], [])
+        self.assertEqual(again["prompts_to_label"], scan["prompts_to_label"])
 
-    def test_second_scan_counts_cached_labels_against_the_cap(self):
+    def test_report_uses_only_the_labels_of_this_run(self):
+        self.write_labels(self.scan())
+        self.assertEqual(self.run_cli("report", "--final").returncode, 0)
+        self.scan()
+        result = self.run_cli("report", "--final")
+        self.assertIn("no labeled prompts", result.stdout)
+
+    def test_scan_caps_each_window_at_200(self):
         shutil.rmtree(self.home / ".claude")
         write_logs(self.home, per_day=110)
-        scan = self.scan()
-        self.assertEqual(scan["prompts_to_label"], 600)
-        self.write_labels(scan)
-        self.assertEqual(self.run_cli("report", "--final").returncode, 0)
-        self.assertEqual(self.scan()["prompts_to_label"], 0)
+        self.assertEqual(self.scan()["prompts_to_label"], 600)
 
     def scan_in_process(self, *args: str) -> dict:
         import cli

@@ -38,7 +38,7 @@ Report:         ~/.claude/is-it-nerfed/report-2026-10-04.html
 
 - Your local session logs in `~/.claude*/projects/` (and in `$CLAUDE_CONFIG_DIR/projects/`
   if you set that variable).
-- It writes its cache and the reports to `~/.claude/is-it-nerfed/`.
+- It writes its work files, the changelog labels, and the reports to `~/.claude/is-it-nerfed/`.
 
 Your prompts do not leave your machine, other than to the Sonnet subagents that run in your
 own Claude Code session. The script makes only two network requests, both public GETs with
@@ -49,13 +49,15 @@ no data from you:
 
 ## Cost
 
-The labels use your Claude plan, at about 1.4k Sonnet tokens per labeled prompt. A first run
-labels about 600 prompts, which uses about 0.9M tokens. Later runs label only the new prompts, because the labels are
-cached.
+The labels use your Claude plan, at about 1.4k Sonnet tokens per labeled prompt. Each run
+labels up to 600 prompts (up to 200 per window), which uses about 0.9M tokens. A run does not reuse
+the labels of an earlier run. One judge labels both windows in the same run, so a change of the judge
+cannot look like a change of the model.
 
 ## Keep more history
 
-Claude Code deletes session logs after 30 days by default. To keep more history for a
+Claude Code deletes session logs after 30 days by default. The tool compares two windows of
+the logs that remain, so the baseline is the oldest part of those logs. To keep more history for a
 better baseline, set `cleanupPeriodDays` in `~/.claude/settings.json`:
 
 ```json
