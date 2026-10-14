@@ -86,6 +86,38 @@ class ParseLinesTest(unittest.TestCase):
             assistant([tool("Edit", file_path="C:\\x\\b.py", old_string="a", new_string="b")], 4, msg="m3"))
         self.assertEqual([e.kind for e in session.events].count("blind_edit"), 1)
 
+    def test_bash_command_with_a_path_relative_to_the_session_folder_names_the_file(self):
+        session = parse_lines(
+            user("edit it", 1),
+            dict(assistant([tool("Bash", command="sed -n '1,50p' src/app/route.ts")], 2, msg="m1"), cwd="/repo"),
+            dict(assistant([tool("Edit", file_path="/repo/src/app/route.ts", old_string="a", new_string="b")],
+                           3, msg="m2"), cwd="/repo"))
+        self.assertEqual([e.kind for e in session.events].count("blind_edit"), 0)
+
+    def test_file_loaded_as_instructions_is_not_a_blind_edit(self):
+        session = parse_lines(
+            {"type": "attachment", "attachment": {"type": "instructions",
+                                                  "files": [{"path": "/h/memory/MEMORY.md", "content": "x"}]}},
+            user("remember this", 1),
+            assistant([tool("Edit", file_path="/h/memory/MEMORY.md", old_string="a", new_string="b")], 2))
+        self.assertEqual([e.kind for e in session.events].count("blind_edit"), 0)
+
+    def test_relative_path_must_match_the_whole_name(self):
+        session = parse_lines(
+            user("edit it", 1),
+            dict(assistant([tool("Bash", command="cat tests/test_check.py")], 2, msg="m1"), cwd="/repo"),
+            dict(assistant([tool("Edit", file_path="/repo/check.py", old_string="a", new_string="b")],
+                           3, msg="m2"), cwd="/repo"))
+        self.assertEqual([e.kind for e in session.events].count("blind_edit"), 1)
+
+    def test_self_correction_needs_the_whole_phrase(self):
+        texts = ["Anyone can sign up, no waitlist.", "The page shows nothing while you wait, so it feels slow.",
+                 "Do you want me to wait, or retry?", "There is no waiting on the review.",
+                 "With two attempts and no wait between them, each run fails."]
+        for text in texts:
+            session = parse_lines(user("go", 1), assistant([{"type": "text", "text": text}], 2))
+            self.assertEqual([e.kind for e in session.events].count("self_correction"), 0, text)
+
     def test_output_tokens_use_the_largest_value_per_message(self):
         session = parse_lines(
             user("go", 1),

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 INTERRUPT_PREFIX = "[Request interrupted by user"
 SYSTEM_PREFIXES = (
@@ -28,7 +28,7 @@ OWN_RUN = re.compile(r"<command-name>/is-it-nerfed|skills/is-it-nerfed/scripts/c
 SYNTHETIC_MODEL = "<synthetic>"
 EDIT_TOOLS = ("Edit", "MultiEdit")
 SELF_CORRECTION = re.compile(
-    r"\b(?:oh wait|no wait|wait,|hmm,? actually|actually,? wait|let me reconsider|i was wrong|my mistake)",
+    r"\b(?:oh wait|hmm,? actually|actually,? wait|let me reconsider|i was wrong|my mistake)\b",
     re.I)
 
 
@@ -129,6 +129,7 @@ def _turn(session: Session) -> Optional[Prompt]:
 
 
 def _read_line(line: dict, session: Session, state: _State) -> None:
+    state.cwd = line.get("cwd") or state.cwd
     kind = line.get("type")
     if kind == "user":
         _read_user(line, session, state)
@@ -136,8 +137,11 @@ def _read_line(line: dict, session: Session, state: _State) -> None:
         _read_assistant(line, session, state)
     elif kind == "system" and line.get("subtype") == "compact_boundary" and _turn(session):
         _turn(session).compactions += 1
-    elif kind == "attachment" and not session.claude_md_files:
-        session.claude_md_files = _claude_md_files(line.get("attachment"))
+    elif kind == "attachment":
+        # A file in the context is not blind.
+        state.tool_values.update(f["path"] for f in _instruction_files(line.get("attachment")))
+        if not session.claude_md_files:
+            session.claude_md_files = _claude_md_files(line.get("attachment"))
 
 
 @dataclass
@@ -147,7 +151,8 @@ class _State:
     message_tokens: Dict[str, int] = field(default_factory=dict)  # largest output_tokens per message id
     seen_tool_ids: set = field(default_factory=set)
     tool_values: set = field(default_factory=set)  # every string input of earlier tool calls
-    commands: List[str] = field(default_factory=list)  # earlier Bash commands, which can name a file anywhere
+    commands: List[Tuple[str, str]] = field(default_factory=list)  # earlier Bash commands with their folder
+    cwd: str = ""
     model: Optional[str] = None
     interrupted: bool = False
 
@@ -234,12 +239,24 @@ def _read_behavior(content: list, text: str, when: datetime, model: Optional[str
         if block.get("name") in EDIT_TOOLS:
             kinds.append("edit")
             path = str(tool_input.get("file_path", ""))
-            if path and path not in state.tool_values and not any(path in c for c in reversed(state.commands)):
+            if path and path not in state.tool_values and not any(_names_file(c, cwd, path)
+                                                                  for cwd, c in reversed(state.commands)):
                 kinds.append("blind_edit")
         state.tool_values.update(v for v in tool_input.values() if isinstance(v, str))
         if block.get("name") == "Bash" and isinstance(tool_input.get("command"), str):
-            state.commands.append(tool_input["command"])
+            state.commands.append((state.cwd, tool_input["command"]))
     session.events += [Event(when, model, kind) for kind in kinds]
+
+
+def _names_file(command: str, cwd: str, path: str) -> bool:
+    """A command names a file by its absolute path, or by its whole path relative to the folder it ran in."""
+    if path in command:
+        return True
+    folder = cwd.rstrip("/") + "/"
+    if not cwd or not path.startswith(folder):
+        return False
+    relative = re.escape(path[len(folder):])
+    return re.search(r"(?:^|[\s'\"=])(?:\./)?%s(?=$|[\s'\";|)>])" % relative, command) is not None
 
 
 def _user_text(content: Any) -> Optional[str]:
@@ -252,13 +269,16 @@ def _user_text(content: Any) -> Optional[str]:
     return None
 
 
-def _claude_md_files(attachment: Any) -> Dict[str, str]:
+def _instruction_files(attachment: Any) -> List[dict]:
     if not isinstance(attachment, dict) or attachment.get("type") != "instructions":
-        return {}
-    files = [f for f in attachment.get("files") or [] if isinstance(f, dict)]
+        return []
+    return [f for f in attachment.get("files") or [] if isinstance(f, dict) and isinstance(f.get("path"), str)]
+
+
+def _claude_md_files(attachment: Any) -> Dict[str, str]:
     return {
         f["path"]: hashlib.sha256(f.get("content", "").encode("utf-8")).hexdigest()[:12]
-        for f in files if str(f.get("path", "")).lower().endswith("claude.md")
+        for f in _instruction_files(attachment) if f["path"].lower().endswith("claude.md")
     }
 
 
