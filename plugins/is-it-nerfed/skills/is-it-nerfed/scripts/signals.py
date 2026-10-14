@@ -12,7 +12,6 @@ from stats import SessionCount, Window
 @dataclass(frozen=True)
 class Signal:
     name: str
-    label: str
     kind: str  # the event counted
     per: str  # the event it is counted against
     scale: int  # 100 for a percentage, 1000 for "per 1,000"
@@ -20,9 +19,9 @@ class Signal:
 
 # Pre-declared from the March 2026 regression (anthropics/claude-code#42796), where each moved 3-6x.
 SIGNALS = (
-    Signal("blind edits", "Edits of a file no earlier tool call named (%)", "blind_edit", "edit", 100),
-    Signal("interrupts", "Interrupts per 1,000 tool calls", "interrupt", "tool", 1000),
-    Signal("self-corrections", "Self-corrections per 1,000 tool calls", "self_correction", "tool", 1000),
+    Signal("blind edits", "blind_edit", "edit", 100),
+    Signal("interrupts", "interrupt", "tool", 1000),
+    Signal("self-corrections", "self_correction", "tool", 1000),
 )
 
 

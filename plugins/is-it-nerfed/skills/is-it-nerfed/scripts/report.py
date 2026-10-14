@@ -36,7 +36,7 @@ WORSE = {v for v, (kind, _, _, _) in VERDICTS.items() if kind in ("critical", "w
 BETTER = {"better", "leaning_better"}
 STATUS_TEXT: Dict[str, str] = {
     "too_early": "too early: fewer than 3 active days, no verdict yet",
-    "judge_drift": "no verdict: the judge matched only %s of the anchor labels (it needs 80%%)",
+    "judge_drift": "no verdict: the judge got only %s of the test prompts right (it needs 80%%)",
     "no_labels": "no verdict: one window has no labeled prompts",
 }
 ROLL_DAYS = 5
@@ -83,10 +83,6 @@ def _pts(x: float) -> str:
 
 def _times(ratio: float) -> str:
     return "×%.1f" % ratio
-
-
-def _times_interval(ratio: float, lo: float, hi: float) -> str:
-    return "%s (%s to %s)" % (_times(ratio), _times(lo), _times(hi))
 
 
 def _cap(text: str) -> str:
@@ -185,22 +181,19 @@ def _behavior_text(a: Analysis) -> str:
     return "No change in %s, or %s." % (", ".join(names[:-1]), names[-1])
 
 
-def _setup_parts(side: Dict[str, dict]) -> List[Tuple[str, str]]:
+def _setup_parts(a: Analysis) -> List[Tuple[str, str]]:
     """An icon name and a sentence for each setup change that can affect the result."""
-    base, recent = side["base"], side["recent"]
     parts = []
-    if recent["claude_md_edits"] > 0:
-        parts.append(("file-text", "CLAUDE.md changed %d×." % recent["claude_md_edits"]))
-    if base["top_projects"] and recent["top_projects"]:
-        top_b, top_r = base["top_projects"][0][0], recent["top_projects"][0][0]
-        if top_b != top_r:
-            short = short_projects([top_b, top_r])
-            parts.append(("folder", "Main project changed: %s → %s." % (short[top_b], short[top_r])))
+    if a.side["recent"]["claude_md_edits"] > 0:
+        parts.append(("file-text", "CLAUDE.md changed %d×." % a.side["recent"]["claude_md_edits"]))
+    if a.shared_verdict:
+        parts.append(("folder", "Your project mix changed. On the same projects only, it is %s."
+                      % VERDICTS[a.shared_verdict][2]))
     return parts
 
 
-def _setup_text(side: Dict[str, dict]) -> str:
-    return " ".join(text for _, text in _setup_parts(side)) or "No change that can affect the result."
+def _setup_text(a: Analysis) -> str:
+    return " ".join(text for _, text in _setup_parts(a)) or "No change that can affect the result."
 
 
 def _claude_code_text(a: Analysis) -> str:
@@ -249,7 +242,7 @@ def summary(a: Analysis, report_path: Path) -> List[str]:
         _titled("Verdict", _verdict_text(a)),
         _titled("Model mistakes", _mistakes_text(a)),
         _titled("Agent behavior", _behavior_text(a)),
-        _titled("Your setup", _setup_text(a.side)),
+        _titled("Your setup", _setup_text(a)),
         _titled("Claude Code", _claude_code_text(a)),
         _titled("Confidence", _confidence_text(a)),
         last,
@@ -363,7 +356,7 @@ def _header(a: Analysis) -> str:
     when = ""
     if a.base and a.recent:
         when = '<div class="windows">%s%s</div>' % (_window_chip("Before", a.base), _window_chip("Now", a.recent))
-    return '<header><p class="product">Model drift report</p><h1>%s</h1>%s</header>' % (escape(_question(a)), when)
+    return '<header><h1>%s</h1>%s</header>' % (escape(_question(a)), when)
 
 
 def _meter(level: str) -> str:
@@ -379,10 +372,14 @@ def _verdict_panel(a: Analysis) -> str:
                 % (_icon("neutral"), escape(_no_verdict_text(a))))
     kind, word = VERDICTS[a.verdict][:2]
     level, reason = _confidence(a)
+    cause = ""
+    if a.verdict in WORSE and a.attribution:
+        cause = '<p class="cause">%s<span><strong>Probable cause:</strong> Claude Code %s.</span></p>' % (
+            _icon("terminal-2"), escape("; ".join(a.attribution)))
     return ('<section class="verdict %s"><span class="verdict-icon">%s</span><div>'
-            '<p class="verdict-word">%s</p><p class="verdict-text">%s</p>'
+            '<p class="verdict-word">%s</p><p class="verdict-text">%s</p>%s'
             '<p class="confidence">%s<strong>%s confidence</strong> %s</p></div></section>'
-            % (kind, _icon(kind), word, escape(_verdict_detail(a)), _meter(level), level, escape(reason)))
+            % (kind, _icon(kind), word, escape(_verdict_detail(a)), cause, _meter(level), level, escape(reason)))
 
 
 def _category(area: str, icon: str, title: str, status: str, body: str) -> str:
@@ -404,25 +401,15 @@ def _delta(a: Analysis) -> str:
     return '<span class="delta %s">%s</span>' % (kind, _pts(a.boot.diff))
 
 
-def _mistakes_visual(a: Analysis) -> str:
-    """Two large figures and two plain bars on one shared scale; no bars when no prompt has a mistake."""
+def _mistakes_figures(a: Analysis) -> str:
+    """The two rates as large figures with their counts; no change chip when no prompt has a mistake."""
     b = a.boot
-    widest = max(b.base_rate, b.recent_rate, 1.0)
-    rows = (("before", "Before", b.base_rate, b.k_base, b.n_base),
-            ("now", "Now", b.recent_rate, b.k_recent, b.n_recent))
-    any_mistake = b.k_base or b.k_recent
-    figures = ('<div class="figures"><div><span class="figure">%s</span><span class="caption">Before</span></div>'
-               '<span class="arrow" aria-hidden="true">→</span>'
-               '<div><span class="figure now">%s</span><span class="caption">Now</span></div>%s</div>'
-               % (_pct(b.base_rate), _pct(b.recent_rate), _delta(a) if any_mistake else ""))
-    if not any_mistake:
-        return figures
-    bars = "".join('<div class="bar-row"><span class="caption">%s</span><span class="bar-track">'
-                   '<span class="bar %s" style="width:%.1f%%" data-tip="%s: %d of %d prompts"></span>'
-                   '</span></div>'
-                   % (label, kind, max(100 * rate / widest, 1.5), label, k, n)
-                   for kind, label, rate, k, n in rows)
-    return figures + '<div class="bars">%s</div>' % bars
+    figure = ('<div><span class="figure%s">%s</span><span class="caption"><strong>%s</strong><br>%d of %d prompts'
+              '</span>%s</div>')
+    return ('<div class="figures">%s<span class="arrow" aria-hidden="true">→</span>%s</div>'
+            % (figure % ("", _pct(b.base_rate), "Before", b.k_base, b.n_base, ""),
+               figure % (" now", _pct(b.recent_rate), "Now", b.k_recent, b.n_recent,
+                         _delta(a) if b.k_base or b.k_recent else "")))
 
 
 def _behavior_status(a: Analysis) -> str:
@@ -443,28 +430,35 @@ def _signal_values(r: SignalResult) -> str:
 def _signal_tag(r: SignalResult) -> str:
     if r.direction == "up":
         return '<span class="tag warning">↑ %.1f×</span>' % r.ratio
-    if r.direction == "down":
-        return '<span class="tag good">↓ %.1f×</span>' % r.ratio
-    return '<span class="tag neutral">Within noise</span>'
+    return '<span class="tag good">↓ %.1f×</span>' % r.ratio
 
 
-def _signal_rows(results: List[SignalResult]) -> str:
-    return '<ul class="signals">%s</ul>' % "".join(
+def _behavior_body(a: Analysis) -> str:
+    """A row per signal that moved, and one line that names the signals that did not."""
+    moved = _moved(a.signals)
+    if not moved:
+        return "<p>%s</p>" % escape(_behavior_text(a))
+    rows = '<ul class="signals">%s</ul>' % "".join(
         '<li class="signal-row"><span><strong>%s</strong><span class="caption">%s</span></span>%s</li>'
-        % (escape(_cap(r.signal.name)), escape(_signal_values(r)), _signal_tag(r))
-        for r in results) if results else ""
+        % (escape(_cap(r.signal.name)), escape(_signal_values(r)), _signal_tag(r)) for r in moved)
+    same = [r.signal.name for r in a.signals if not r.direction]
+    return rows + ("<p>No change in %s.</p>" % escape(", ".join(same)) if same else "")
 
 
 def _setup_status(a: Analysis) -> str:
-    return _status("warning", "Changed") if _setup_parts(a.side) else _status("good", "Same")
+    return _status("warning", "Changed") if _setup_parts(a) else _status("good", "Same")
+
+
+def _facts(items: List[Tuple[str, str]]) -> str:
+    """A list of icon names and HTML lines."""
+    return '<ul class="facts">%s</ul>' % "".join("<li>%s<span>%s</span></li>" % (_icon(i), html) for i, html in items)
 
 
 def _setup_body(a: Analysis) -> str:
-    parts = _setup_parts(a.side)
+    parts = _setup_parts(a)
     if not parts:
-        return "<p>%s</p>" % escape(_setup_text(a.side))
-    return '<ul class="facts">%s</ul>' % "".join(
-        "<li>%s<span>%s</span></li>" % (_icon(icon), escape(text)) for icon, text in parts)
+        return "<p>%s</p>" % escape(_setup_text(a))
+    return _facts([(icon, escape(text)) for icon, text in parts])
 
 
 def _claude_code_status(a: Analysis) -> str:
@@ -475,19 +469,22 @@ def _claude_code_status(a: Analysis) -> str:
     return _status("good", "Same")
 
 
+def _claude_code_body(a: Analysis) -> str:
+    if not a.harness:
+        return "<p>%s</p>" % escape(_claude_code_text(a))
+    return _facts([("terminal-2", "<strong>%s</strong> %s.<br>%s" % (
+        escape(h["version"]), escape(h["line"]), escape(h["reason"]))) for h in a.harness])
+
+
 def _categories(a: Analysis) -> str:
+    """The possible causes first (your setup, Claude Code), then the evidence (mistakes, behavior)."""
     if a.status != "ok":
         return ""
-    b = a.boot
-    counts = "<p>%d of %d prompts before, %d of %d now.</p>" % (b.k_base, b.n_base, b.k_recent, b.n_recent)
     return '<section class="categories">%s%s%s%s</section>' % (
-        _category("mistakes", "message-report", "Model mistakes", _mistakes_status(a),
-                  counts + _mistakes_visual(a)),
-        _category("behavior", "robot", "Agent behavior", _behavior_status(a),
-                  "<p>%s</p>%s" % (escape(_behavior_text(a)), _signal_rows(a.signals))),
         _category("setup", "adjustments-horizontal", "Your setup", _setup_status(a), _setup_body(a)),
-        _category("code", "terminal-2", "Claude Code", _claude_code_status(a),
-                  "<p>%s</p>" % escape(_claude_code_text(a))))
+        _category("code", "terminal-2", "Claude Code", _claude_code_status(a), _claude_code_body(a)),
+        _category("mistakes", "message-report", "Model mistakes", _mistakes_status(a), _mistakes_figures(a)),
+        _category("behavior", "robot", "Agent behavior", _behavior_status(a), _behavior_body(a)))
 
 
 def _section_head(icon: str, title: str, meta: str = "") -> str:
@@ -540,9 +537,8 @@ def _projects(top: List[Tuple[str, float]], short: Dict[str, str]) -> str:
     return "<br>".join("%s %s" % (escape(short[n]), _pct(100 * s)) for n, s in top) or "none"
 
 
+# The setup numbers the cards do not show; the table keeps only the rows that changed.
 SIDE_ROWS = [
-    ("CLAUDE.md edits", lambda s, short: str(s["claude_md_edits"])),
-    ("CLI versions", lambda s, short: escape(", ".join(s["cli_versions"])) or "none"),
     ("Median prompt length", lambda s, short: "%d characters" % s["median_prompt_chars"]),
     ("Project mix", lambda s, short: _projects(s["top_projects"], short)),
     ("Compactions per session", lambda s, short: "%.1f" % s["compactions_per_session"]),
@@ -562,32 +558,17 @@ def _numbers(a: Analysis) -> str:
     out = []
     b = a.boot
     if b.k_base or b.k_recent:
-        out.append('<div class="stats">%s%s%s</div>'
+        out.append('<div class="stats">%s%s</div>'
                    % (_stat("Mistakes now vs before", _times(b.ratio)),
-                      _stat("90% interval", "%s to %s" % (_times(b.ratio_lo), _times(b.ratio_hi))),
-                      _stat("Change", _pts(b.diff))))
-    if a.shared_verdict:
-        out.append('<p>Your project mix changed. On projects that appear in both windows, the verdict is %s; '
-                   'on all projects, it is %s.</p>' % (VERDICTS[a.shared_verdict][2], VERDICTS[a.verdict][2]))
-    if a.signals:
-        out.append('<h3>Agent behavior</h3><table><thead><tr><th></th><th>Before</th><th>Now</th>'
-                   '<th>Change, 90%% range</th></tr></thead><tbody>%s</tbody></table>'
-                   % "".join('<tr><th scope="row">%s</th><td>%.1f</td><td>%.1f</td><td>%s</td></tr>'
-                             % (escape(r.signal.label), r.base_rate, r.recent_rate,
-                                _times_interval(r.ratio, r.lo, r.hi)) for r in a.signals))
+                      _stat("90% interval", "%s to %s" % (_times(b.ratio_lo), _times(b.ratio_hi)))))
     if a.side:
         short = _side_names(a.side)
-        out.append('<h3>Your setup</h3><table><thead><tr><th></th><th>Before</th><th>Now</th></tr></thead>'
-                   '<tbody>%s</tbody></table>'
-                   % "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>'
-                             % (label, cell(a.side["base"], short), cell(a.side["recent"], short))
-                             for label, cell in SIDE_ROWS))
-    if a.harness:
-        out.append('<h3>Claude Code changes that can change model quality</h3><div class="changes">%s</div>'
-                   % "".join('<div class="change"><span class="chip">%s<strong>%s</strong></span>'
-                             '<p><strong>%s</strong><br>%s</p></div>'
-                             % (_icon("terminal-2"), escape(h["version"]), escape(h["line"]), escape(h["reason"]))
-                             for h in a.harness))
+        rows = [(label, cell(a.side["base"], short), cell(a.side["recent"], short)) for label, cell in SIDE_ROWS]
+        rows = [r for r in rows if r[1] != r[2]]
+        if rows:
+            out.append('<h3>Other setup changes</h3><table><thead><tr><th></th><th>Before</th><th>Now</th></tr>'
+                       '</thead><tbody>%s</tbody></table>'
+                       % "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>' % r for r in rows))
     if a.compare is not None:
         c = a.compare
         out.append('<h3>Against %s</h3><p>Less controlled: different weeks. Verdict: %s. %s: %s of %d prompts. '
@@ -595,7 +576,7 @@ def _numbers(a: Analysis) -> str:
                    % (escape(model_name(a.prev_model)), VERDICTS[a.compare_verdict][2],
                       escape(model_name(a.prev_model)), _pct(c.base_rate), c.n_base,
                       escape(model_name(a.model)), _pct(c.recent_rate), c.n_recent))
-    return _details("table", "All numbers", "".join(out))
+    return _details("table", "All numbers", "".join(out)) if out else ""
 
 
 METHOD_STEPS = [
@@ -609,7 +590,7 @@ METHOD_STEPS = [
 def _method(a: Analysis) -> str:
     steps = list(METHOD_STEPS)
     if a.judge_agreement is not None:
-        steps.append(("target", "The judge matched %s of the anchor labels." % _pct(100 * a.judge_agreement)))
+        steps.append(("target", "The judge got %s of the test prompts right." % _pct(100 * a.judge_agreement)))
     return _details("info-circle", "How this works", '<ol class="steps">%s</ol>' % "".join(
         "<li>%s<span>%s</span></li>" % (_tile(icon), escape(text)) for icon, text in steps))
 

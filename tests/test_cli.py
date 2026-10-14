@@ -139,7 +139,7 @@ class CliTest(unittest.TestCase):
         self.write_labels(scan, judge_ok=False)
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("anchor labels", result.stdout)
+        self.assertIn("test prompts right", result.stdout)
         self.assertEqual(jsonl.read(self.data / "cache" / "labels.jsonl"), [])
 
     def test_labels_without_a_judge_check_are_not_cached(self):
