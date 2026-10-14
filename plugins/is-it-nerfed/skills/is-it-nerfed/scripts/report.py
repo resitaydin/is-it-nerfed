@@ -10,7 +10,7 @@ from string import Template
 from typing import Dict, List, Optional, Tuple
 
 from analyze import Analysis
-from signals import SIGNALS, SignalResult
+from signals import SignalResult
 from stats import MIN_EVENTS, Window
 
 # Per verdict: the status icon, the word (the HTML badge and the first terminal sentence),
@@ -182,8 +182,12 @@ def _behavior_text(a: Analysis) -> str:
     if moved:
         text = "; ".join("%s %.1f× as often as before" % (r.signal.name, r.ratio) for r in moved)
         return _cap(text) + "."
-    names = [s.name for s in SIGNALS]
-    return "No change in %s, or %s." % (", ".join(names[:-1]), names[-1])
+    names = [r.signal.name for r in a.signals]
+    if not names:
+        return "Too few events to measure."
+    if len(names) == 1:
+        return "No change in %s." % names[0]
+    return "No change in %s%s or %s." % (", ".join(names[:-1]), "," if len(names) > 2 else "", names[-1])
 
 
 def _setup_parts(side: Dict[str, dict]) -> List[str]:
@@ -362,6 +366,8 @@ def _mistakes_visual(a: Analysis) -> str:
 
 
 def _behavior_status(a: Analysis) -> str:
+    if not a.signals:
+        return _status("neutral", "Too few events")
     directions = {r.direction for r in a.signals}
     if "up" in directions:
         return _status("warning", "Higher")
@@ -477,7 +483,7 @@ def _numbers(a: Analysis) -> str:
                    'on all projects, it is %s.</p>' % (VERDICTS[a.shared_verdict][2], VERDICTS[a.verdict][2]))
     if a.signals:
         out.append('<h3>Agent behavior</h3><table><thead><tr><th></th><th>Before</th><th>Now</th>'
-                   '<th>Change, 90%% range</th></tr></thead><tbody>%s</tbody></table>'
+                   '<th>Change, 95%% range</th></tr></thead><tbody>%s</tbody></table>'
                    % "".join('<tr><th scope="row">%s</th><td>%.1f</td><td>%.1f</td><td>%s</td></tr>'
                              % (escape(r.signal.label), r.base_rate, r.recent_rate,
                                 _times_interval(r.ratio, r.lo, r.hi)) for r in a.signals))

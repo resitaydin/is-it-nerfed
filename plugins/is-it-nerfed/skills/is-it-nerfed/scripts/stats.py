@@ -63,10 +63,10 @@ def rate(counts: List[SessionCount]) -> float:
     return 100.0 * hits / total if total else 0.0
 
 
-def _interval(ordered: List[float]) -> Tuple[float, float]:
-    """The 5th and 95th percentiles of sorted values: a 90% interval."""
+def _interval(ordered: List[float], tail: float = 0.05) -> Tuple[float, float]:
+    """The percentiles of sorted values with `tail` cut on each side: by default a 90% interval."""
     n = len(ordered)
-    return ordered[int(0.05 * n)], ordered[min(n - 1, int(0.95 * n))]
+    return ordered[int(tail * n)], ordered[min(n - 1, int((1 - tail) * n))]
 
 
 def _ratio(hits_base: int, n_base: int, hits_recent: int, n_recent: int) -> float:
@@ -130,11 +130,14 @@ def cluster_bootstrap(base: List[SessionCount], recent: List[SessionCount],
 
 def ratio_bootstrap(base: List[SessionCount], recent: List[SessionCount],
                     n: int = 2000, seed: int = 0) -> Tuple[float, float, float]:
-    """Rate ratio with a 90% interval from resampling sessions only, for counts with no upper bound."""
+    """Rate ratio with a 95% interval from resampling sessions only, for counts with no upper bound.
+
+    With few sessions, a 90% interval from this bootstrap is too narrow: it gave a false rise in 8% of
+    A/A runs instead of 5%."""
     rng = random.Random(seed)
     ratios = sorted(_ratio(*totals(rng.choices(base, k=len(base))), *totals(rng.choices(recent, k=len(recent))))
                     for _ in range(n))
-    return (_ratio(*totals(base), *totals(recent)),) + _interval(ratios)
+    return (_ratio(*totals(base), *totals(recent)),) + _interval(ratios, tail=0.025)
 
 
 def verdict(r: BootResult) -> str:

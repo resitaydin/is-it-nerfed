@@ -96,14 +96,26 @@ and shows the ratio interval.
 
 ## Behavior signals on real logs
 
-Measured on the author's local logs (2026-10-04). A/A: random halves of the sessions of one
-model, 200 runs. Planted: extra events added to one half at the given ratio.
+Measured on the author's local logs. A/A: random halves of the sessions of one model, 200 runs.
 
-| Model (sessions) | A/A: any signal rises | Blind edits ×2 / ×3 | Interrupts ×2 / ×3 |
-| ---------------- | --------------------- | ------------------- | ------------------ |
-| Opus 5.5 (46) | 22% | 80% / 100% | 44% / 74% |
-| Fable 5.1 (47) | 24% | 38% / 67% | 70% / 98% |
-| Opus 5 (28) | 25% | 74% / 100% | 60% / 90% |
+| Date | Model (sessions) | A/A: any signal rises | Events: blind edits / interrupts / self-corrections |
+| ---- | ---------------- | --------------------- | --------------------------------------------------- |
+| 2026-10-04 | Opus 5.5 (46) | 22% | (not recorded) |
+| 2026-10-04 | Fable 5.1 (47) | 24% | (not recorded) |
+| 2026-10-04 | Opus 5 (28) | 25% | (not recorded) |
+| 2026-10-14 | Opus 5.5 (159) | 2% | 1 / 17 / 7 |
+| 2026-10-14 | Fable 5.1 (27) | 4% | 0 / 17 / 1 |
+| 2026-10-14 | Opus 5 (11) | 7% | 0 / 12 / 0 |
 
-So the confirmation rule removes about 75% of the judge's firm false alarms. In the March 2026
-regression the signals moved 3–6×; at ×3 they confirm in 67–100% of runs.
+The 2026-10-04 rows came from three faults, which the 2026-10-14 rows do not have:
+
+- The parser missed Bash reads by a relative path, so 124 of 403 edits counted as blind. After the
+  fix, 1 of 403 is blind.
+- The interval for a signal was 90%. With few sessions, it gave a false rise in 8% of A/A runs
+  instead of 5%. The interval is now 95%.
+- A signal with no events could rise: the half hit added to each side made its ratio compare only
+  the tool calls. A signal now needs 10 events in both windows together.
+
+The planted-signal results from 2026-10-04 are removed, because they planted extra blind edits on
+top of the false ones. On these logs, only interrupts have enough events to measure, so a firm
+"worse" verdict is confirmed only when interrupts rise.

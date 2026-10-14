@@ -153,12 +153,16 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 - Agent-behavior signals (no judge, all sessions of the model in each window), pre-declared from
   the March 2026 regression ([claude-code#42796](https://github.com/anthropics/claude-code/issues/42796)):
   - Blind edits: `Edit`/`MultiEdit` calls on a file that no earlier tool call in the session named,
-    as a share of edits.
+    as a share of edits. A Bash command names a file by its absolute path or by its whole path
+    relative to the folder it ran in. A file in an `instructions` attachment is in the context, so
+    an edit of it is not blind.
   - Interrupts per 1,000 tool calls.
   - Self-corrections ("oh wait", "I was wrong", and similar) per 1,000 tool calls.
 
-  Each signal gets a rate ratio and a 90% interval from 2,000 session resamples. A signal
-  "rises" when the interval lies above 1. The read:edit ratio is left out: most reads go through
+  Each signal gets a rate ratio and a 95% interval from 2,000 session resamples. A signal
+  "rises" when the interval lies above 1. A signal with fewer than 10 events in both windows
+  together gives no result, because the half hit added to each side then compares only the
+  amount of work. The read:edit ratio is left out: most reads go through
   Bash in auto mode, so it measures the workflow, not the model.
 - Windows: if the model has fewer than 28 active days, split its active days into a first and a
   second half. Otherwise, the first 14 days against the last 14 days. When the model first reaches 28 active days, the baseline result

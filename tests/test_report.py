@@ -99,7 +99,7 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(lines[:5], [
             "Verdict:        Not nerfed. Opus 5.5 works as well for you as before.",
             "Model mistakes: 15 of 160 prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
-            "Agent behavior: No change in blind edits, interrupts, or self-corrections.",
+            "Agent behavior: No change in blind edits.",
             "Your setup:     No change that can affect the result.",
             "Claude Code:    2 updates in the recent window. None can change model quality.",
         ])
@@ -108,6 +108,13 @@ class SummaryTest(unittest.TestCase):
                          "Claude Code:    2 updates in the recent window. The changelog was not checked (offline).")
         a.side["recent"]["cli_versions"] = ["2.1.280"]
         self.assertEqual(report.summary(a, REPORT)[4], "Claude Code:    No update in the recent window.")
+
+    def test_summary_behavior_without_enough_events(self):
+        a = fixture()
+        a.signals = []
+        self.assertEqual(report.summary(a, REPORT)[2], "Agent behavior: Too few events to measure.")
+        a.signals = [SignalResult(SIGNALS[0], 8.0, 9.1, 1.1, 0.7, 1.6), SignalResult(SIGNALS[2], 1.0, 1.1, 1.1, 0.5, 2)]
+        self.assertEqual(report.summary(a, REPORT)[2], "Agent behavior: No change in blind edits or self-corrections.")
 
     def test_summary_verdict_words(self):
         a = fixture()
@@ -258,6 +265,12 @@ class RenderTest(unittest.TestCase):
         self.assertIn("Not nerfed", out)
         self.assertNotIn(">Higher<", out)
         self.assertNotIn(">Changed<", out)
+
+    def test_render_behavior_without_enough_events_is_not_same(self):
+        a = fixture()
+        a.signals = []
+        out = report.render(a)
+        self.assertIn(">Too few events<", out)
 
     def test_render_behavior_has_one_row_per_signal(self):
         out = report.render(fixture())

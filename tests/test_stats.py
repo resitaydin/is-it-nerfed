@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import random
 import unittest
 from datetime import date, timedelta
 
@@ -87,6 +88,20 @@ class RatioBootstrapTest(unittest.TestCase):
         self.assertGreater(lo, 1)
         self.assertLess(lo, ratio)
         self.assertGreater(hi, ratio)
+
+
+    def test_aa_false_rise_rate(self):
+        # Behavior signals: event counts per session vary a lot, and a "rise" is a ratio interval above 1.
+        def side(rng, n):
+            out = []
+            for i in range(n):
+                tools, rate = rng.randint(20, 400), 0.01 * rng.lognormvariate(-0.5, 1)
+                out.append(("s%d" % i, sum(rng.random() < rate for _ in range(tools)), tools))
+            return out
+        rng = random.Random(7)
+        runs = 300
+        rises = sum(stats.ratio_bootstrap(side(rng, 30), side(rng, 30), n=1000, seed=i)[1] > 1 for i in range(runs))
+        self.assertLessEqual(rises / runs, 0.05)
 
 
 class VerdictTest(unittest.TestCase):

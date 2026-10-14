@@ -37,7 +37,7 @@ class SignalResult:
 
     @property
     def direction(self) -> Optional[str]:
-        """"up" or "down" when the 90% interval of the ratio excludes 1, else None."""
+        """"up" or "down" when the 95% interval of the ratio excludes 1, else None."""
         if self.lo > 1:
             return "up"
         if self.hi < 1:
@@ -61,11 +61,11 @@ def window_counts(sessions: List[parse.Session], model: str, window: Window) -> 
 
 
 def compare(base: Dict[str, List[SessionCount]], recent: Dict[str, List[SessionCount]]) -> List[SignalResult]:
-    """One result per signal that has events on both sides."""
+    """One result per signal with counts on both sides and at least stats.MIN_EVENTS events in total."""
     out = []
     for signal in SIGNALS:
         b, r = base.get(signal.name, []), recent.get(signal.name, [])
-        if b and r:
+        if b and r and stats.totals(b)[0] + stats.totals(r)[0] >= stats.MIN_EVENTS:
             ratio, lo, hi = stats.ratio_bootstrap(b, r)
             scale = signal.scale / 100
             out.append(SignalResult(signal, scale * stats.rate(b), scale * stats.rate(r), ratio, lo, hi))

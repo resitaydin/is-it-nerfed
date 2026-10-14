@@ -38,12 +38,19 @@ class CompareTest(unittest.TestCase):
         recent = [session("r%d" % i, date(2026, 9, 15 + i), calls(100, 6)) for i in range(10)]
         both = base + recent
         results = signals.compare(*(signals.window_counts(both, OPUS5, w) for w in (BASE, RECENT)))
-        self.assertEqual([r.signal.name for r in results], ["interrupts", "self-corrections"])
+        self.assertEqual([r.signal.name for r in results], ["interrupts"])  # no self-corrections: too few
         r = results[0]
         self.assertAlmostEqual(r.base_rate, 10.0)
         self.assertAlmostEqual(r.recent_rate, 60.0)
         self.assertGreater(r.lo, 1)
         self.assertTrue(signals.confirms_worse(results))
+
+    def test_signal_with_too_few_events_gives_no_result(self):
+        # With no events, the half hit added to each side makes the ratio compare only the tool calls.
+        base = [session("b%d" % i, date(2026, 9, 1 + i), calls(1000, 0)) for i in range(10)]
+        recent = [session("r%d" % i, date(2026, 9, 15 + i), calls(50, 0)) for i in range(10)]
+        both = base + recent
+        self.assertEqual(signals.compare(*(signals.window_counts(both, OPUS5, w) for w in (BASE, RECENT))), [])
 
     def test_no_change_does_not_confirm(self):
         sessions = [session("b%d" % i, date(2026, 9, 1 + i), calls(100, 2)) for i in range(10)]
