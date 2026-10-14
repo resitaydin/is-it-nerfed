@@ -10,10 +10,16 @@ body { font-family:"Bricolage Grotesque",sans-serif; display:grid; grid-template
 h1 { font-weight:800; font-size:112px; line-height:.9; letter-spacing:-.028em; }
 .lede { margin-top:30px; font-size:29px; line-height:1.32; font-weight:500; color:var(--ink2); max-width:450px; text-wrap:balance; }
 .cmd { margin-top:40px; display:inline-block; font:700 26px "JetBrains Mono",monospace; background:var(--ink); color:#fff; padding:14px 22px; border-radius:10px; }
-.panel { background:var(--card); border-radius:22px; padding:34px 36px 30px; align-self:center; box-shadow:0 1px 0 #cfd8e4, 0 24px 48px -28px rgba(15,27,51,.35); }
-.panel h2 { font-size:22px; font-weight:500; color:var(--ink2); }
-svg { display:block; margin-top:14px; }
-.verdict { margin-top:18px; padding-top:20px; border-top:2px solid var(--bg); font:500 22px/1.45 "JetBrains Mono",monospace; }
+.panel { background:var(--card); border-radius:22px; padding:40px 40px 36px; align-self:center; box-shadow:0 1px 0 #cfd8e4, 0 24px 48px -28px rgba(15,27,51,.35); }
+.panel h2 { font-size:25px; font-weight:500; color:var(--ink2); }
+.row { display:grid; grid-template-columns:100px 1fr; align-items:center; gap:12px; margin-top:28px; font-size:28px; font-weight:500; }
+.row:first-of-type { margin-top:36px; }
+.track { display:flex; align-items:center; gap:16px; width:250px; }
+.bar { flex:none; display:block; height:60px; border-radius:10px; background:var(--base); }
+.value { font-weight:800; font-size:40px; color:var(--base); }
+.now .bar { background:var(--bad); }
+.now .value { color:var(--bad); }
+.verdict { margin-top:36px; padding-top:24px; border-top:2px solid var(--bg); font:500 22px/1.45 "JetBrains Mono",monospace; }
 .verdict b { color:var(--bad); font-weight:700; }
 </style></head>
 <body>
@@ -23,27 +29,9 @@ svg { display:block; margin-top:14px; }
   <div class="cmd">/is-it-nerfed</div>
 </div>
 <div class="panel">
-  <h2>Prompts where you had to correct the model</h2>
-  <svg width="476" height="250" viewBox="0 0 476 250" font-family="JetBrains Mono" font-size="16">
-    <!-- y: 0% at 220, 20% at 20 -> 10px per % -->
-    <line x1="0" y1="220" x2="476" y2="220" stroke="#D5DDE8" stroke-width="2"/>
-    <!-- baseline window -->
-    <g fill="var(--base)">
-      <circle cx="24"  cy="134" r="7"/><circle cx="66"  cy="124" r="7"/><circle cx="108" cy="136" r="7"/>
-      <circle cx="150" cy="122" r="7"/><circle cx="192" cy="130" r="7"/>
-    </g>
-    <line x1="10" y1="130" x2="206" y2="130" stroke="var(--base)" stroke-width="4" stroke-linecap="round"/>
-    <text x="10" y="102" fill="var(--base)" font-weight="700" font-size="26">9%</text>
-    <text x="10" y="244" fill="var(--ink2)">before</text>
-    <!-- recent window -->
-    <g fill="var(--bad)">
-      <circle cx="284" cy="78" r="7"/><circle cx="326" cy="64" r="7"/><circle cx="368" cy="74" r="7"/>
-      <circle cx="410" cy="62" r="7"/><circle cx="452" cy="72" r="7"/>
-    </g>
-    <line x1="270" y1="70" x2="466" y2="70" stroke="var(--bad)" stroke-width="4" stroke-linecap="round"/>
-    <text x="270" y="42" fill="var(--bad)" font-weight="700" font-size="26">15%</text>
-    <text x="270" y="244" fill="var(--ink2)">last 2 weeks</text>
-  </svg>
+  <h2>How often you had to correct the model</h2>
+  <div class="row"><span class="label">Before</span><span class="track"><span class="bar" style="width:60%"></span><span class="value">9%</span></span></div>
+  <div class="row now"><span class="label">Now</span><span class="track"><span class="bar" style="width:100%"></span><span class="value">15%</span></span></div>
   <p class="verdict"><b>Nerfed for you.</b> Opus is slightly<br>worse for you (78% probability).</p>
 </div>
 </body></html>
