@@ -124,6 +124,18 @@ class SummaryTest(unittest.TestCase):
             a.verdict = verdict
             self.assertEqual(report.summary(a, REPORT)[0], "Verdict:        " + text)
 
+    def test_summary_too_few_events(self):
+        a = fixture()
+        a.verdict = "too_few_events"
+        a.boot.k_base, a.boot.k_recent = 3, 6
+        self.assertEqual(report.summary(a, REPORT)[0], "Verdict:        Not enough data. "
+                         "The judge found only 9 model mistakes in both windows; a verdict needs 10.")
+
+    def test_summary_names_a_cause_only_for_a_worse_verdict(self):
+        a = fixture()
+        a.verdict = "no_change"
+        self.assertEqual(report.summary(a, REPORT)[4], "Claude Code:    2 updates in the recent window.")
+
     def test_summary_confidence_levels(self):
         a = fixture()
         a.daily = [(d, k, n) for d, k, n in a.daily if d <= a.recent[0] + timedelta(days=2)]

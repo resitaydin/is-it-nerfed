@@ -93,7 +93,7 @@ class CliTest(unittest.TestCase):
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.strip().splitlines()
-        self.assertIn("Opus 5.5", lines[0])
+        self.assertIn("Not enough data", lines[0])  # every real prompt is labeled "other"
         self.assertTrue(lines[-1].startswith("Report:"))
         self.assertTrue((self.data / ("report-%s.html" % TODAY)).exists())
         self.assertTrue((self.data / "cache" / "labels.jsonl").exists())

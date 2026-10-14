@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 Window = Tuple[date, date]
 SessionCount = Tuple[str, int, int]  # session_id, model-caused steering count, labeled count
 MIN_SESSIONS = 5  # labeled sessions per side below which only a leaning verdict is given
+MIN_EVENTS = 10  # model-caused labels in both windows together below which no change can be measured
 SESOI_RATIO = 1.5  # smallest rate ratio that matters
 FLOOR = 1.5  # smallest absolute change that matters, in percentage points
 CLEAR_RATIO = 2.0
@@ -137,10 +138,15 @@ def ratio_bootstrap(base: List[SessionCount], recent: List[SessionCount],
 
 
 def verdict(r: BootResult) -> str:
-    """Rate-ratio verdict: a rare event that doubles is a real change, whatever its size in points."""
+    """Rate-ratio verdict: a rare event that doubles is a real change, whatever its size in points.
+
+    "no_change" needs the ratio interval inside the SESOI band: a small difference in points alone
+    does not rule out a doubling of a rare event."""
+    if r.k_base + r.k_recent < MIN_EVENTS:
+        return "too_few_events"
     if min(r.s_base, r.s_recent) < MIN_SESSIONS:
         return _leaning(r)
-    if (r.ratio_lo >= 1 / SESOI_RATIO and r.ratio_hi <= SESOI_RATIO) or (r.lo >= -FLOOR and r.hi <= FLOOR):
+    if r.ratio_lo >= 1 / SESOI_RATIO and r.ratio_hi <= SESOI_RATIO:
         return "no_change"
     if r.ratio_lo > 1 and r.diff >= FLOOR:
         return "clearly_worse" if r.ratio >= CLEAR_RATIO else "slightly_worse"

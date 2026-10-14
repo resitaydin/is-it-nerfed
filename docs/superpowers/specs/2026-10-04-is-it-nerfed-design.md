@@ -173,7 +173,8 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 
 | Verdict | Condition |
 |---|---|
-| No change | The ratio interval lies inside ×0.67 to ×1.5, or the difference interval inside ±1.5 points. |
+| Not enough data | The two windows together have fewer than 10 model-caused labels. |
+| No change | The ratio interval lies inside ×0.67 to ×1.5. |
 | Clearly worse | The ratio interval lies above 1, the difference is 1.5 points or more, and the ratio is 2 or more. |
 | Slightly worse | The ratio interval lies above 1 and the difference is 1.5 points or more. |
 | Better | The ratio interval lies below 1 and the difference is −1.5 points or less. |
@@ -189,7 +190,7 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
   windows. If the verdict differs, the report says "your project mix changed" and shows both.
 - Model against model: the same calculation on the recent window of the current model and the
   last window of the previous model, labeled "less controlled: different weeks".
-- Attribution lines: when a CLI version with an `affects_behavior: yes` line starts inside the
+- Attribution lines (shown only with a "worse" verdict): when a CLI version with an `affects_behavior: yes` line starts inside the
   recent window, or an incident overlaps it, the summary names it as a possible cause.
 
 ## 6. Report

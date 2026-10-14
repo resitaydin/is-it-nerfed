@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import unittest
 from datetime import date, timedelta
 
@@ -7,7 +8,6 @@ import stats
 from analyze import FIRM_WORSE as WORSE
 from tests.synth import make_counts
 
-LEANING = ("leaning_worse", "leaning_better", "unclear")
 
 
 def days(n):
@@ -69,7 +69,7 @@ class BootstrapTest(unittest.TestCase):
         r = stats.cluster_bootstrap([("a", 1, 10)], [("b", 3, 10)], n=5000)
         self.assertEqual(r.diff, 20.0)
         self.assertLess(r.lo, r.hi)
-        self.assertIn(stats.verdict(r), LEANING)
+        self.assertEqual(stats.verdict(r), "too_few_events")
 
 
 class RatioBootstrapTest(unittest.TestCase):
@@ -93,7 +93,7 @@ class VerdictTest(unittest.TestCase):
     def test_verdict_table(self):
         rows = [
             (result(lo=-3, hi=3, ratio_lo=0.8, ratio_hi=1.4), "no_change"),
-            (result(lo=-1, hi=1.4, ratio_lo=0.3, ratio_hi=3.0), "no_change"),
+            (result(lo=-1, hi=1.4, ratio_lo=0.3, ratio_hi=3.0), "unclear"),
             (result(lo=1, hi=7, diff=4, ratio=2.2, ratio_lo=1.2, ratio_hi=4), "clearly_worse"),
             (result(lo=0.2, hi=4, diff=2, ratio=1.6, ratio_lo=1.1, ratio_hi=2.5), "slightly_worse"),
             (result(lo=-6, hi=-1, diff=-3, ratio=0.4, ratio_lo=0.2, ratio_hi=0.8), "better"),
@@ -103,6 +103,17 @@ class VerdictTest(unittest.TestCase):
         ]
         for r, expected in rows:
             self.assertEqual(stats.verdict(r), expected, r)
+
+    def test_small_difference_alone_is_not_no_change(self):
+        # A rare event can double and still move less than 1.5 points: that is not "no change".
+        r = result(lo=-0.5, hi=1.2, diff=0.4, p_worse=0.7, ratio=2.0, ratio_lo=0.4, ratio_hi=9)
+        self.assertEqual(stats.verdict(r), "unclear")
+
+    def test_too_few_events_gives_no_verdict(self):
+        r = dataclasses.replace(result(lo=-1, hi=1, ratio_lo=0.9, ratio_hi=1.1), k_base=3, k_recent=6)
+        self.assertEqual(stats.verdict(r), "too_few_events")
+        r = dataclasses.replace(r, k_recent=7)
+        self.assertEqual(stats.verdict(r), "no_change")
 
     def test_worse_needs_the_absolute_floor(self):
         r = result(lo=0.1, hi=2, diff=1, p_worse=0.97, ratio=3.0, ratio_lo=1.2, ratio_hi=8)
@@ -156,6 +167,12 @@ class CalibrationTest(unittest.TestCase):
     def test_aa_rarely_leans(self):
         v = self.verdicts(0.035, 0.035, n_sessions=100)
         self.assertLessEqual(self.share(v, ("leaning_worse", "leaning_better")), 0.45)
+
+    def test_rare_event_at_real_size_never_claims_no_change(self):
+        # Real logs: model-caused steering near 0.5% and at most 200 labeled prompts per window.
+        v = self.verdicts(0.005, 0.005, n_sessions=25)
+        self.assertLessEqual(self.share(v, ("no_change",)), 0.05)
+        self.assertGreaterEqual(self.share(v, ("too_few_events",)), 0.5)
 
     def test_planted_doubling(self):
         v = self.verdicts(0.035, 0.07, n_sessions=100)

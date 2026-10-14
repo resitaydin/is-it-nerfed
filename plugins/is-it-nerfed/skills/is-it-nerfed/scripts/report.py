@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 from analyze import Analysis
 from signals import SIGNALS, SignalResult
-from stats import Window
+from stats import MIN_EVENTS, Window
 
 # Per verdict: the status icon, the word (the HTML badge and the first terminal sentence),
 # the short text, and the detail sentence.
@@ -21,6 +21,8 @@ VERDICTS: Dict[str, Tuple[str, str, str, str]] = {
     "leaning_better": ("good", "Not nerfed", "probably better",
                        "%(name)s is probably better for you (%(p)s probability)."),
     "unclear": ("neutral", "No clear change", "no clear change", "The data does not show a change either way."),
+    "too_few_events": ("neutral", "Not enough data", "too few model mistakes to measure",
+                       "The judge found only %(events)d model mistakes in both windows; a verdict needs %(min)d."),
     "slightly_worse": ("critical", "Nerfed for you", "slightly worse",
                        "%(name)s is slightly worse for you (%(p)s probability)."),
     "clearly_worse": ("critical", "Nerfed for you", "clearly worse",
@@ -156,7 +158,8 @@ def _titled(title: str, text: str) -> str:
 
 def _verdict_detail(a: Analysis) -> str:
     p = a.boot.p_worse if a.verdict in WORSE else 1 - a.boot.p_worse
-    return VERDICTS[a.verdict][3] % {"name": model_name(a.model), "p": _pct(100 * p)}
+    return VERDICTS[a.verdict][3] % {"name": model_name(a.model), "p": _pct(100 * p),
+                                     "events": a.boot.k_base + a.boot.k_recent, "min": MIN_EVENTS}
 
 
 def _verdict_text(a: Analysis) -> str:
@@ -202,16 +205,15 @@ def _setup_text(side: Dict[str, dict]) -> str:
 
 
 def _claude_code_text(a: Analysis) -> str:
-    if a.attribution:
-        return "; ".join(a.attribution) + (
-            ". This can explain the drift." if a.verdict in WORSE else ". This can change model quality.")
+    if a.attribution and a.verdict in WORSE:
+        return "; ".join(a.attribution) + ". This can explain the drift."
     new = [v for v in a.side["recent"]["cli_versions"] if v not in a.side["base"]["cli_versions"]]
     if not new:
         return "No update in the recent window."
     count = "%d update%s in the recent window." % (len(new), "" if len(new) == 1 else "s")
     if not a.overlay_ok:
         return count + " The changelog was not checked (offline)."
-    return count + " None can change model quality."
+    return count if a.attribution else count + " None can change model quality."
 
 
 def _confidence_text(a: Analysis) -> str:
@@ -394,7 +396,7 @@ def _setup_status(a: Analysis) -> str:
 
 
 def _claude_code_status(a: Analysis) -> str:
-    if a.attribution:
+    if a.attribution and a.verdict in WORSE:
         return _status("warning", "Check")
     if not a.overlay_ok:
         return _status("neutral", "Not checked")
