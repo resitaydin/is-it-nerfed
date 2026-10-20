@@ -200,15 +200,14 @@ def _markers(days: List[date], version_dates: Dict[str, date],
 
 
 def _shared_verdict(sessions: List[parse.Session], base: List[SessionCount],
-                    recent: List[SessionCount], main: str) -> Optional[str]:
+                    recent: List[SessionCount]) -> Optional[str]:
     project = {s.session_id: s.project for s in sessions}
     shared = {project.get(c[0]) for c in base} & {project.get(c[0]) for c in recent}
     shared.discard(None)
     keep = lambda counts: [c for c in counts if project.get(c[0]) in shared]
     if not shared:
         return None
-    other = stats.verdict(stats.cluster_bootstrap(keep(base), keep(recent)))
-    return other if other != main else None
+    return stats.verdict(stats.cluster_bootstrap(keep(base), keep(recent)))
 
 
 def _shown(verdict: Optional[str], confirmed: bool) -> Optional[str]:
@@ -230,7 +229,7 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     out.base, out.recent = base, recent
     base_counts = session_counts(sessions, model, base, labels)
     recent_counts = session_counts(sessions, model, recent, labels)
-    if not stats.totals(base_counts)[1] or not stats.totals(recent_counts)[1]:
+    if not base_counts or not recent_counts:
         out.status = "no_labels"
     elif judge_drifted(judge_agreement):
         out.status = "judge_drift"
@@ -243,7 +242,7 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
     confirmed = signals_mod.confirms_worse(out.signals)
     verdict = stats.verdict(out.boot)
     out.verdict = _shown(verdict, confirmed)
-    shared = _shown(_shared_verdict(sessions, base_counts, recent_counts, verdict), confirmed)
+    shared = _shown(_shared_verdict(sessions, base_counts, recent_counts), confirmed)
     out.shared_verdict = shared if shared != out.verdict else None
     out.prev_model = previous_model(sessions, model)
     if out.prev_model:

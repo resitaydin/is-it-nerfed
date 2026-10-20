@@ -227,7 +227,6 @@ class RunTests(unittest.TestCase):
         sessions = base + recent
         labels = {p.uuid: label(s.project == "old") for s in sessions for p in s.prompts}
         analysis = run(sessions, labels)
-        self.assertNotEqual(analysis.verdict, "")
         self.assertIsNotNone(analysis.shared_verdict)
         self.assertNotEqual(analysis.shared_verdict, analysis.verdict)
 

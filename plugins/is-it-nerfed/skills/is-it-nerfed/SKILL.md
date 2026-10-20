@@ -4,6 +4,8 @@ description: Checks whether the user's Claude model got worse for them, from the
 allowed-tools:
   - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/cli.py:*)
   - Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py":*)
+  - Read(~/.is-it-nerfed/**)
+  - Edit(~/.is-it-nerfed/**)
 ---
 
 # Is it nerfed?
@@ -73,15 +75,18 @@ If the user says no, stop. Do not label anything.
 Write: `Step 2 of 3: labeling <T> batches with Sonnet, 4 at a time…`, where T is the number of
 agents (the `batches` count, plus 1 when `interpret_batch` is not null).
 
-For each path in `batches`, start one Agent with `model: "sonnet"`, the description
-`Label batch <i> of <T>`, and this prompt (put in the real paths):
+Start every labeling agent in the background with `subagent_type: "is-it-nerfed:labeler"`. That
+agent runs on Sonnet and has only the Read and Write tools.
+
+For each path in `batches`, start one agent with the description `Label batch <i> of <T>` and
+this prompt (put in the real paths):
 
 > Read ${CLAUDE_SKILL_DIR}/judge-prompt.md. Then label every item in <batch path> and write
 > the labels to <labels_dir>/<batch file name>. Reply with only: done <lines written>.
 
 `<batch file name>` is the last part of the batch path, for example `batch-003.jsonl`.
 
-If `interpret_batch` is not null, start one more Agent with `model: "sonnet"`:
+If `interpret_batch` is not null, start one more agent:
 
 > Read ${CLAUDE_SKILL_DIR}/interpret-prompt.md. Then label every item in <interpret_batch>
 > and write the labels to <interpret_labels>. Reply with only: done <lines written>.
@@ -107,12 +112,14 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" report
 ```
 
 - Exit code 0: stdout has the summary lines. Go to step 5.
-- Exit code 3: stdout is `{"status": "retry", "batches": [<path>]}`. Label that batch with one
-  Sonnet agent, the same way as in step 3. Then run:
+- Exit code 3: stdout is `{"status": "retry", "batches": [<path>, ...]}`. Label each batch with
+  one agent, the same way as in step 3. Then run:
 
   ```
   python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" report --final
   ```
+
+- Any other exit code: tell the user the last line of stderr, and stop.
 
 If stderr says "N items left without a label", tell the user that number in one line. The
 verdict still uses all the labels that exist.

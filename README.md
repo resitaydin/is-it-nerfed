@@ -27,14 +27,14 @@ Agent behavior: Interrupts 3.2× as often as before.
 Your setup:     CLAUDE.md changed 2×.
 Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.
 Confidence:     Medium. 330 prompts over 10 days.
-Report:         ~/.claude/is-it-nerfed/report-2026-10-04.html
+Report:         ~/.is-it-nerfed/report-2026-10-04.html
 ```
 
 The HTML report adds a chart, the Claude Code releases, and the status incidents in that time.
 
 ## Privacy
 
-- It reads your session logs in `~/.claude*/projects/` and writes only to `~/.claude/is-it-nerfed/`.
+- It reads your session logs in `~/.claude*/projects/` and writes only to `~/.is-it-nerfed/`.
 - Your prompts go only to the Sonnet subagents in your own Claude Code session.
 - It makes two public GET requests that carry no data from you: the
   [Claude Code changelog](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md)
@@ -43,7 +43,7 @@ The HTML report adds a chart, the Claude Code releases, and the status incidents
 ## Cost
 
 About 1.4k Sonnet tokens per prompt, on your own Claude plan. Each run labels up to 600
-prompts (about 0.9M tokens) and takes about 3 minutes. A run does not reuse old labels: one
+prompts (about 0.9M tokens) and takes 3 to 5 minutes. A run does not reuse old labels: one
 judge labels both windows, so a change of the judge cannot look like a change of the model.
 
 ## Tip: keep more history
@@ -60,7 +60,7 @@ that remain. For a better baseline, add this to `~/.claude/settings.json`:
 ```
 claude plugin uninstall is-it-nerfed@is-it-nerfed
 claude plugin marketplace remove is-it-nerfed
-rm -rf ~/.claude/is-it-nerfed
+rm -rf ~/.is-it-nerfed
 ```
 
 ## License

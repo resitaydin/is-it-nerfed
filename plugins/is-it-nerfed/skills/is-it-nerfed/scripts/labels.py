@@ -34,9 +34,17 @@ def valid(label: dict, item: dict) -> bool:
             and bool(_norm(evidence)) and _norm(evidence) in item_text(item))
 
 
+SHORT_MAX = 80
+
+
 def valid_interp(row: dict) -> bool:
-    """An interpret label: whether a changelog line can change model behavior, with a short text for it."""
-    return row.get("affects_behavior") in ("yes", "no") and isinstance(row.get("short"), str) and bool(row["short"])
+    """An interpret label: whether a changelog line can change model behavior, with a short text for it.
+
+    The short text goes into the summary that Claude shows as printed, so it must be one plain line.
+    """
+    short = row.get("short")
+    return (row.get("affects_behavior") in ("yes", "no") and isinstance(short, str)
+            and 0 < len(short) <= SHORT_MAX and not any(c in short for c in "\n\r`"))
 
 
 def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[str, dict], List[str]]:

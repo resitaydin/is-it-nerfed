@@ -22,7 +22,8 @@ import stats
 SKILL_DIR = Path(__file__).resolve().parent.parent
 CHANGELOG_URL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
 INCIDENTS_URL = "https://status.claude.com/api/v2/incidents.json"
-DEFAULT_DATA_DIR = "~/.claude/is-it-nerfed"
+# Outside ~/.claude: Claude Code asks before every write there, even with an allow rule.
+DEFAULT_DATA_DIR = "~/.is-it-nerfed"
 EXIT_NO_LOGS = 2
 EXIT_RETRY = 3
 
@@ -38,15 +39,6 @@ class Paths:
         self.to_interpret = self.work / "to_interpret.jsonl"
         self.interp_labels = self.work / "interp-labels.jsonl"
         self.interp_cache = self.data / "cache" / "interp.jsonl"
-
-
-def _read_json(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
-
-def _write_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _emit(data: dict) -> None:
@@ -112,9 +104,9 @@ def scan(args: argparse.Namespace) -> int:
     interpret = None if args.offline else _fetch_overlay(paths, sessions, list(windows))
     if interpret:
         jsonl.write(paths.to_interpret, interpret)
-    _write_json(paths.plan, {
+    paths.plan.write_text(json.dumps({
         "model": model, "today": today.isoformat(), "overlay_ok": interpret is not None,
-        "items": {sample.item_id(u): u for u in picked}})
+        "items": {sample.item_id(u): u for u in picked}}), encoding="utf-8")
     lines = interpret or []
     result.update(prompts_to_label=len(items), batches=[str(b) for b in batches],
                   interpret_batch=str(paths.to_interpret) if lines else None,
@@ -145,14 +137,13 @@ def report_cmd(args: argparse.Namespace) -> int:
     if not paths.plan.exists():
         print("No scan found. Run scan first.", file=sys.stderr)
         return 1
-    plan = _read_json(paths.plan, {})
+    plan = json.loads(paths.plan.read_text(encoding="utf-8"))
     today = date.fromisoformat(args.today) if args.today else date.fromisoformat(plan["today"])
     items = _batch_items(paths)
     found, missing = labels_mod.read_labels(sorted(paths.labels_dir.glob("*.jsonl")), items)
     if missing and not args.final:
-        retry = paths.to_label / "retry-001.jsonl"
-        jsonl.write(retry, [items[i] for i in missing])
-        _emit({"status": "retry", "batches": [str(retry)]})
+        retries = sample.write_batches([items[i] for i in missing], [], paths.to_label, prefix="retry")
+        _emit({"status": "retry", "batches": [str(r) for r in retries]})
         return EXIT_RETRY
     if missing:
         print("%d items left without a label" % len(missing), file=sys.stderr)

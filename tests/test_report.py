@@ -37,11 +37,11 @@ def fixture(status: str = "ok") -> Analysis:
     return Analysis(
         status=status, model="claude-opus-5-5", prev_model="claude-opus-5-4",
         base=base, recent=recent,
-        boot=BootResult(diff=6.2, lo=1.1, hi=11.0, p_worse=0.78, base_rate=9.1, recent_rate=15.3, k_base=15, k_recent=26,
+        boot=BootResult(diff=6.2, p_worse=0.78, base_rate=9.1, recent_rate=15.3, k_base=15, k_recent=26,
                         n_base=160, n_recent=170, s_base=24, s_recent=26,
                         ratio=1.7, ratio_lo=1.1, ratio_hi=2.6),
         verdict="slightly_worse", shared_verdict="leaning_worse",
-        compare=BootResult(diff=-1.0, lo=-6.0, hi=4.0, p_worse=0.35, base_rate=16.3, recent_rate=15.3, k_base=23, k_recent=26,
+        compare=BootResult(diff=-1.0, p_worse=0.35, base_rate=16.3, recent_rate=15.3, k_base=23, k_recent=26,
                            n_base=140, n_recent=170, s_base=22, s_recent=26,
                            ratio=0.94, ratio_lo=0.6, ratio_hi=1.3),
         compare_verdict="leaning_better",

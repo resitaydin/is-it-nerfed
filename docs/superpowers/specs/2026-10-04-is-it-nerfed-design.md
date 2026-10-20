@@ -173,8 +173,8 @@ labels each line `affects_behavior: yes | no` with a one-sentence reason.
 - Uncertainty: 5,000 two-stage cluster-bootstrap resamples per window. Stage 1 resamples the
   labeled sessions with replacement. Stage 2 draws the model-caused count of each picked session
   from a binomial with that session's size and rate. Output: the difference (recent minus
-  baseline), the rate ratio (recent over baseline, half a hit added to each side), 90% intervals
-  for both, and P(worse) = share of resamples with a difference > 0.
+  baseline), the rate ratio (recent over baseline, half a hit added to each side), 90% interval
+  for the ratio, and P(worse) = share of resamples with a difference > 0.
 - Verdict on the rate ratio, because model-caused steering is rare (about 3.5% of prompts) and a
   doubling is only a few points. SESOI = ratio 1.5, with an absolute floor of 1.5 points:
 

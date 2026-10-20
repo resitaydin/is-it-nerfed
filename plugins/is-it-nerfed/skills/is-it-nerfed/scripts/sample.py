@@ -93,14 +93,14 @@ def build_item(p: parse.Prompt) -> dict:
 
 
 def write_batches(items: List[dict], anchors: List[dict], out_dir: Path,
-                  batch_size: int = 40) -> List[Path]:
-    """Shuffle items and anchors together and write batch-NNN.jsonl files."""
+                  batch_size: int = 40, prefix: str = "batch") -> List[Path]:
+    """Shuffle items and anchors together and write <prefix>-NNN.jsonl files."""
     hidden = [dict({k: a[k] for k in ANCHOR_KEYS}, id=anchor_item_id(a)) for a in anchors]
     rows = list(items) + hidden
     random.Random(0).shuffle(rows)
     paths = []
     for n, start in enumerate(range(0, len(rows), batch_size), 1):
-        paths.append(out_dir / ("batch-%03d.jsonl" % n))
+        paths.append(out_dir / ("%s-%03d.jsonl" % (prefix, n)))
         jsonl.write(paths[-1], rows[start:start + batch_size])
     return paths
 

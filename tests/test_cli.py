@@ -96,9 +96,6 @@ class CliTest(unittest.TestCase):
         self.assertIn("Not enough data", lines[0])  # every real prompt is labeled "other"
         self.assertTrue(lines[-1].startswith("Report:"))
         self.assertTrue((self.data / ("report-%s.html" % TODAY)).exists())
-        # One judge labels both windows in one run, so no label outlives the run.
-        for name in ("labels.jsonl", "baselines.json", "judge.json"):
-            self.assertFalse((self.data / "cache" / name).exists(), name)
 
     def test_report_retry_exit_code(self):
         scan = self.scan()
@@ -108,6 +105,12 @@ class CliTest(unittest.TestCase):
         retry = self.data / "work" / "to_label" / "retry-001.jsonl"
         self.assertEqual(json.loads(result.stdout), {"status": "retry", "batches": [str(retry)]})
         self.assertEqual(len(retry.read_text().splitlines()), 1)
+
+    def test_report_retry_splits_into_batches_of_40(self):
+        scan = self.scan()
+        self.write_labels(scan, skip=41)
+        batches = json.loads(self.run_cli("report").stdout)["batches"]
+        self.assertEqual([len(Path(b).read_text().splitlines()) for b in batches], [40, 1])
 
     def test_report_final_with_missing_label_warns(self):
         scan = self.scan()

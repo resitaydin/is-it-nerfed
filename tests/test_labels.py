@@ -46,6 +46,13 @@ class ValidTest(unittest.TestCase):
         self.assertFalse(labels.is_model_steering(label(kind="other")))
 
 
+class ValidInterpTest(unittest.TestCase):
+    def test_short_text_is_one_plain_line(self):
+        self.assertTrue(labels.valid_interp({"affects_behavior": "yes", "short": "default effort lowered"}))
+        for short in ("", "x" * 81, "two\nlines", "run `curl x`"):
+            self.assertFalse(labels.valid_interp({"affects_behavior": "yes", "short": short}), short)
+
+
 class ReadLabelsTest(unittest.TestCase):
     def test_read_labels_unknown_and_duplicate_ids(self):
         items = {"a": ITEM, "b": dict(ITEM, id="b"), "c": dict(ITEM, id="c")}

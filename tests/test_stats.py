@@ -16,8 +16,8 @@ def days(n):
     return [start + timedelta(days=i) for i in range(n)]
 
 
-def result(lo, hi, diff=0.0, p_worse=0.5, sessions=10, ratio=1.0, ratio_lo=0.5, ratio_hi=2.0):
-    return stats.BootResult(diff, lo, hi, p_worse, 10.0, 10.0 + diff, 10, 10, 100, 100, sessions, sessions,
+def result(diff=0.0, p_worse=0.5, sessions=10, ratio=1.0, ratio_lo=0.5, ratio_hi=2.0):
+    return stats.BootResult(diff, p_worse, 10.0, 10.0 + diff, 10, 10, 100, 100, sessions, sessions,
                             ratio, ratio_lo, ratio_hi)
 
 
@@ -43,8 +43,8 @@ class BootstrapTest(unittest.TestCase):
         counts = make_counts(30, 8, 0.12, 1)
         r = stats.cluster_bootstrap(counts, counts, n=500)
         self.assertEqual(r.diff, 0)
-        self.assertLessEqual(r.lo, 0)
-        self.assertGreaterEqual(r.hi, 0)
+        self.assertLessEqual(r.ratio_lo, 1)
+        self.assertGreaterEqual(r.ratio_hi, 1)
 
     def test_empty_side_does_not_crash(self):
         r = stats.cluster_bootstrap([("a", 0, 0)], [("b", 1, 2)], n=50)
@@ -69,7 +69,7 @@ class BootstrapTest(unittest.TestCase):
     def test_one_session_per_side_resamples_prompts(self):
         r = stats.cluster_bootstrap([("a", 1, 10)], [("b", 3, 10)], n=5000)
         self.assertEqual(r.diff, 20.0)
-        self.assertLess(r.lo, r.hi)
+        self.assertLess(r.ratio_lo, r.ratio_hi)
         self.assertEqual(stats.verdict(r), "too_few_events")
 
 
@@ -107,41 +107,41 @@ class RatioBootstrapTest(unittest.TestCase):
 class VerdictTest(unittest.TestCase):
     def test_verdict_table(self):
         rows = [
-            (result(lo=-3, hi=3, ratio_lo=0.8, ratio_hi=1.4), "no_change"),
-            (result(lo=-1, hi=1.4, ratio_lo=0.3, ratio_hi=3.0), "unclear"),
-            (result(lo=1, hi=7, diff=4, ratio=2.2, ratio_lo=1.2, ratio_hi=4), "clearly_worse"),
-            (result(lo=0.2, hi=4, diff=2, ratio=1.6, ratio_lo=1.1, ratio_hi=2.5), "slightly_worse"),
-            (result(lo=-6, hi=-1, diff=-3, ratio=0.4, ratio_lo=0.2, ratio_hi=0.8), "better"),
-            (result(lo=-2, hi=6, diff=2, p_worse=0.85, ratio=1.4, ratio_lo=0.7, ratio_hi=2.8), "leaning_worse"),
-            (result(lo=-6, hi=2, diff=-2, p_worse=0.15, ratio=0.7, ratio_lo=0.3, ratio_hi=1.4), "leaning_better"),
-            (result(lo=-3, hi=3, p_worse=0.6, ratio_lo=0.6, ratio_hi=1.7), "unclear"),
+            (result(ratio_lo=0.8, ratio_hi=1.4), "no_change"),
+            (result(ratio_lo=0.3, ratio_hi=3.0), "unclear"),
+            (result(diff=4, ratio=2.2, ratio_lo=1.2, ratio_hi=4), "clearly_worse"),
+            (result(diff=2, ratio=1.6, ratio_lo=1.1, ratio_hi=2.5), "slightly_worse"),
+            (result(diff=-3, ratio=0.4, ratio_lo=0.2, ratio_hi=0.8), "better"),
+            (result(diff=2, p_worse=0.85, ratio=1.4, ratio_lo=0.7, ratio_hi=2.8), "leaning_worse"),
+            (result(diff=-2, p_worse=0.15, ratio=0.7, ratio_lo=0.3, ratio_hi=1.4), "leaning_better"),
+            (result(p_worse=0.6, ratio_lo=0.6, ratio_hi=1.7), "unclear"),
         ]
         for r, expected in rows:
             self.assertEqual(stats.verdict(r), expected, r)
 
     def test_small_difference_alone_is_not_no_change(self):
         # A rare event can double and still move less than 1.5 points: that is not "no change".
-        r = result(lo=-0.5, hi=1.2, diff=0.4, p_worse=0.7, ratio=2.0, ratio_lo=0.4, ratio_hi=9)
+        r = result(diff=0.4, p_worse=0.7, ratio=2.0, ratio_lo=0.4, ratio_hi=9)
         self.assertEqual(stats.verdict(r), "unclear")
 
     def test_too_few_events_gives_no_verdict(self):
-        r = dataclasses.replace(result(lo=-1, hi=1, ratio_lo=0.9, ratio_hi=1.1), k_base=3, k_recent=6)
+        r = dataclasses.replace(result(ratio_lo=0.9, ratio_hi=1.1), k_base=3, k_recent=6)
         self.assertEqual(stats.verdict(r), "too_few_events")
         r = dataclasses.replace(r, k_recent=7)
         self.assertEqual(stats.verdict(r), "no_change")
 
     def test_worse_needs_the_absolute_floor(self):
-        r = result(lo=0.1, hi=2, diff=1, p_worse=0.97, ratio=3.0, ratio_lo=1.2, ratio_hi=8)
+        r = result(diff=1, p_worse=0.97, ratio=3.0, ratio_lo=1.2, ratio_hi=8)
         self.assertEqual(stats.verdict(r), "leaning_worse")
 
     def test_few_sessions_give_only_leaning(self):
         few = stats.MIN_SESSIONS - 1
         rows = [
-            (result(lo=-1, hi=1, p_worse=0.85, sessions=few, ratio_lo=0.9, ratio_hi=1.1), "leaning_worse"),
-            (result(lo=-1, hi=1, p_worse=0.6, sessions=few, ratio_lo=0.9, ratio_hi=1.1), "unclear"),
-            (result(lo=6, hi=20, diff=12, p_worse=1.0, sessions=few, ratio=3, ratio_lo=2, ratio_hi=5),
+            (result(p_worse=0.85, sessions=few, ratio_lo=0.9, ratio_hi=1.1), "leaning_worse"),
+            (result(p_worse=0.6, sessions=few, ratio_lo=0.9, ratio_hi=1.1), "unclear"),
+            (result(diff=12, p_worse=1.0, sessions=few, ratio=3, ratio_lo=2, ratio_hi=5),
              "leaning_worse"),
-            (result(lo=-20, hi=-6, diff=-12, p_worse=0.0, sessions=few, ratio=0.3, ratio_lo=0.1,
+            (result(diff=-12, p_worse=0.0, sessions=few, ratio=0.3, ratio_lo=0.1,
                     ratio_hi=0.6), "leaning_better"),
         ]
         for r, expected in rows:

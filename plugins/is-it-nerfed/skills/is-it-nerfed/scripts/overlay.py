@@ -68,12 +68,16 @@ def parse_incidents(text: str) -> List[Incident]:
     except ValueError:
         return []
     incidents = []
-    for raw in data.get("incidents", []):
-        resolved = raw.get("resolved_at")
-        incidents.append(Incident(
-            name=raw["name"],
-            start=parse.parse_time(raw.get("started_at") or raw["created_at"]),
-            end=parse.parse_time(resolved) if resolved else None,
-            components=[c["name"] for c in raw.get("components") or []],
-        ))
+    # The feed is not ours: skip a row of another shape instead of failing after the labels are paid for.
+    for raw in data.get("incidents", []) if isinstance(data, dict) else []:
+        try:
+            resolved = raw.get("resolved_at")
+            incidents.append(Incident(
+                name=raw["name"],
+                start=parse.parse_time(raw.get("started_at") or raw["created_at"]),
+                end=parse.parse_time(resolved) if resolved else None,
+                components=[c["name"] for c in raw.get("components") or []],
+            ))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
     return incidents

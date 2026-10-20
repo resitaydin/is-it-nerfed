@@ -55,6 +55,11 @@ class IncidentTest(unittest.TestCase):
     def test_parse_incidents_bad_json(self):
         self.assertEqual(overlay.parse_incidents("<html>502 Bad Gateway</html>"), [])
 
+    def test_parse_incidents_skips_rows_of_another_shape(self):
+        self.assertEqual(overlay.parse_incidents("[1, 2]"), [])
+        text = '{"incidents": [{"id": "no name"}, {"name": "Errors", "created_at": "2026-10-03T09:00:00Z"}]}'
+        self.assertEqual([i.name for i in overlay.parse_incidents(text)], ["Errors"])
+
 
 class FetchTest(unittest.TestCase):
     def test_fetch_returns_none_on_error(self):

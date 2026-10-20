@@ -37,8 +37,6 @@ def make_windows(days: List[date]) -> Optional[Tuple[Window, Window]]:
 @dataclass
 class BootResult:
     diff: float
-    lo: float
-    hi: float
     p_worse: float
     base_rate: float
     recent_rate: float
@@ -107,12 +105,9 @@ def cluster_bootstrap(base: List[SessionCount], recent: List[SessionCount],
         diffs.append((100.0 * hr / nr if nr else 0.0) - (100.0 * hb / nb if nb else 0.0))
         ratios.append(_ratio(hb, nb, hr, nr))
     (k_base, n_base), (k_recent, n_recent) = totals(base), totals(recent)
-    lo, hi = _interval(sorted(diffs))
     ratio_lo, ratio_hi = _interval(sorted(ratios))
     return BootResult(
         diff=rate(recent) - rate(base),
-        lo=lo,
-        hi=hi,
         p_worse=sum(d > 0 for d in diffs) / n,
         base_rate=rate(base),
         recent_rate=rate(recent),
