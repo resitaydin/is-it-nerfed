@@ -398,6 +398,8 @@ def _mistakes_status(a: Analysis) -> str:
         return _status(VERDICTS[a.verdict][0], "Higher")
     if a.verdict in BETTER:
         return _status("good", "Lower")
+    if a.verdict == "too_few_events":
+        return _status("neutral", "Too few events")
     return _status("good", "Same")
 
 
@@ -474,6 +476,8 @@ def _claude_code_status(a: Analysis) -> str:
         return _status("warning", "Check")
     if not a.overlay_ok:
         return _status("neutral", "Not checked")
+    if a.harness:
+        return _status("neutral", "Updated")
     return _status("good", "Same")
 
 

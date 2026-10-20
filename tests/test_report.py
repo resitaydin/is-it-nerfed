@@ -288,6 +288,18 @@ class RenderTest(unittest.TestCase):
         out = report.render(a)
         self.assertIn(">Too few events<", out)
 
+    def test_render_mistakes_with_too_few_events_is_not_same(self):
+        a = fixture()
+        a.verdict = "too_few_events"
+        self.assertIn(">Too few events<", report._mistakes_status(a))
+
+    def test_render_claude_code_with_behavior_updates_is_not_same(self):
+        a = fixture()
+        a.verdict = "no_change"
+        out = report.render(a)
+        self.assertIn(">Updated<", out)
+        self.assertNotIn(">Check<", out)
+
     def test_render_behavior_has_rows_only_for_signals_that_moved(self):
         out = report.render(fixture())
         self.assertEqual(out.count('class="signal-row"'), 1)

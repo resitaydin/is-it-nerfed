@@ -25,9 +25,20 @@ conversation:
 - Do not print any of the user's prompts in the chat.
 - Only the subagents open those files.
 
+## Keep the user informed
+
+A full run takes several minutes. Never leave the user at a blank screen:
+
+- Before each step, write its stage line (given in each step below) in the chat first, then
+  run the step.
+- During step 3, write a progress line each time a labeling agent finishes.
+- Keep each line to one sentence. Do not add other commentary.
+
 ## 1. Scan
 
-Run:
+Write: `Step 1 of 3: reading your session logs (about 10 seconds)…`
+
+Then run:
 
 ```
 python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" scan
@@ -47,9 +58,11 @@ If `batches` is empty and `interpret_batch` is null, nothing needs a label. Skip
 
 Otherwise ask, with N = `prompts_to_label`, M = `interpret_items` and X = `estimated_tokens`
 rounded to the nearest thousand (for example 463,210 → "about 463k tokens"). X includes the
-changelog lines.
+changelog lines. Y is the number of agents (see step 3) divided by 4, rounded up: each group of
+4 agents takes about 1 minute.
 
-> <N> prompts and <M> changelog lines need a label. This uses about <X> tokens from your plan. Continue?
+> <N> prompts and <M> changelog lines need a label. This uses about <X> tokens from your plan
+> and takes about <Y> minutes. Continue?
 
 Leave out the part for N or M when that number is 0.
 
@@ -57,8 +70,11 @@ If the user says no, stop. Do not label anything.
 
 ## 3. Label with Sonnet subagents
 
-For each path in `batches`, start one Agent with `model: "sonnet"` and this prompt (put in the
-real paths):
+Write: `Step 2 of 3: labeling <T> batches with Sonnet, 4 at a time…`, where T is the number of
+agents (the `batches` count, plus 1 when `interpret_batch` is not null).
+
+For each path in `batches`, start one Agent with `model: "sonnet"`, the description
+`Label batch <i> of <T>`, and this prompt (put in the real paths):
 
 > Read ${CLAUDE_SKILL_DIR}/judge-prompt.md. Then label every item in <batch path> and write
 > the labels to <labels_dir>/<batch file name>. Reply with only: done <lines written>.
@@ -74,9 +90,17 @@ Run at most 4 agents at a time. Start the next agent when one finishes. If an ag
 writes fewer lines, continue with the others. The report step finds missing labels and asks
 for them again.
 
+Each time an agent finishes, write a progress bar with one block per agent, for example:
+
+```
+Labeling ▓▓▓▓▓░░░░░░░ 5 of 12 batches done
+```
+
 ## 4. Report
 
-Run:
+Write: `Step 3 of 3: writing the report (about 10 seconds)…`
+
+Then run:
 
 ```
 python3 "${CLAUDE_SKILL_DIR}/scripts/cli.py" report
