@@ -33,7 +33,7 @@ A full run takes several minutes. Never leave the user at a blank screen:
 
 - Before each step, write its stage line (given in each step below) in the chat first, then
   run the step.
-- During step 3, write a progress line each time a labeling agent finishes.
+- During step 3, write a progress bar each time a group of labeling agents finishes.
 - Keep each line to one sentence. Do not add other commentary.
 
 ## 1. Scan
@@ -75,8 +75,9 @@ If the user says no, stop. Do not label anything.
 Write: `Step 2 of 3: labeling <T> batches with Sonnet, 4 at a time…`, where T is the number of
 agents (the `batches` count, plus 1 when `interpret_batch` is not null).
 
-Start every labeling agent in the background. The agents run on Sonnet, have only the Read and
-Write tools, and already hold their label rules.
+The agents run on Sonnet, have only the Read and Write tools, and already hold their label rules.
+Start them in the foreground, never in the background: this skill gives them access to the batch
+folder only while this turn runs.
 
 For each path in `batches`, start one agent with `subagent_type: "is-it-nerfed:judge"`, the
 description `Label batch <i> of <T>`, and this prompt (put in the real paths):
@@ -92,14 +93,14 @@ If `interpret_batch` is not null, start one more agent with
 > Label every item in <interpret_batch> and write the labels to <interpret_labels>.
 > Reply with only: done <lines written>.
 
-Run at most 4 agents at a time. Start the next agent when one finishes. If an agent fails or
-writes fewer lines, continue with the others. The report step finds missing labels and asks
-for them again.
+Start the agents in groups of 4: put the 4 Agent calls in one message, and wait until all 4
+finish. If an agent fails or writes fewer lines, continue with the others. The report step finds
+missing labels and asks for them again.
 
-Each time an agent finishes, write a progress bar with one block per agent, for example:
+After each group, write a progress bar with one block per agent, for example:
 
 ```
-Labeling ▓▓▓▓▓░░░░░░░ 5 of 12 batches done
+Labeling ▓▓▓▓░░░░░░░░ 4 of 12 batches done
 ```
 
 ## 4. Report
