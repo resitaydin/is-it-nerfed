@@ -1,6 +1,6 @@
 # is-it-nerfed
 
-![is-it-nerfed, a Claude Code plugin: Claude feels dumber lately? Your own logs have the receipts.](assets/preview.png)
+![is-it-nerfed, a Claude Code plugin: Claude feels dumber lately? Your own logs have the proof.](assets/preview.png)
 
 Everyone argues about whether Claude got worse. This Claude Code plugin answers the question
 for **you**, from your own session logs, not from vibes on X.

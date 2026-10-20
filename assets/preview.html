@@ -3,11 +3,12 @@
 <html><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500;700&display=block" rel="stylesheet">
 <style>
-:root { --bg:#E9EEF4; --ink:#0F1B33; --ink2:#3A4A66; --base:#7D8BA3; --bad:#E0312F; --card:#FFFFFF; }
+:root { --bg:#E9EEF4; --ink:#0F1B33; --ink2:#3A4A66; --base:#7D8BA3; --bad:#E0312F; --card:#FFFFFF; --claude:#D97757; }
 * { box-sizing:border-box; margin:0; }
 html,body { width:1280px; height:640px; background:var(--bg); color:var(--ink); overflow:hidden; }
 body { font-family:"Bricolage Grotesque",sans-serif; display:grid; grid-template-columns:540px 1fr; gap:48px; padding:72px 72px 64px; }
-.tag { display:inline-block; margin-bottom:22px; font:700 19px "JetBrains Mono",monospace; letter-spacing:.04em; text-transform:uppercase; color:var(--ink2); border:2px solid var(--ink2); padding:6px 12px; border-radius:8px; }
+.tag { display:inline-flex; align-items:center; gap:10px; margin-bottom:22px; font:700 19px "JetBrains Mono",monospace; letter-spacing:.04em; text-transform:uppercase; color:var(--claude); border:2px solid var(--claude); padding:6px 14px 6px 10px; border-radius:8px; }
+.tag svg { flex:none; width:30px; height:30px; stroke:var(--claude); stroke-width:2.3; stroke-linecap:round; }
 h1 { font-weight:800; font-size:112px; line-height:.9; letter-spacing:-.028em; }
 .lede { margin-top:30px; font-size:29px; line-height:1.32; font-weight:500; color:var(--ink2); max-width:450px; text-wrap:balance; }
 .cmd { margin-top:40px; display:inline-block; font:700 26px "JetBrains Mono",monospace; background:var(--ink); color:#fff; padding:14px 22px; border-radius:10px; }
@@ -25,9 +26,9 @@ h1 { font-weight:800; font-size:112px; line-height:.9; letter-spacing:-.028em; }
 </style></head>
 <body>
 <div>
-  <div class="tag">Claude Code plugin</div>
+  <div class="tag"><svg viewBox="0 0 32 32" aria-hidden="true"><line x1="16" y1="16" x2="16" y2="4.5" transform="rotate(7 16 16)"/><line x1="16" y1="16" x2="16" y2="7.5" transform="rotate(37 16 16)"/><line x1="16" y1="16" x2="16" y2="5.5" transform="rotate(67 16 16)"/><line x1="16" y1="16" x2="16" y2="8.5" transform="rotate(97 16 16)"/><line x1="16" y1="16" x2="16" y2="4.5" transform="rotate(127 16 16)"/><line x1="16" y1="16" x2="16" y2="6.5" transform="rotate(157 16 16)"/><line x1="16" y1="16" x2="16" y2="7.5" transform="rotate(187 16 16)"/><line x1="16" y1="16" x2="16" y2="4.5" transform="rotate(217 16 16)"/><line x1="16" y1="16" x2="16" y2="8.5" transform="rotate(247 16 16)"/><line x1="16" y1="16" x2="16" y2="5.5" transform="rotate(277 16 16)"/><line x1="16" y1="16" x2="16" y2="6.5" transform="rotate(307 16 16)"/><line x1="16" y1="16" x2="16" y2="7.5" transform="rotate(337 16 16)"/></svg>Claude Code plugin</div>
   <h1>Is it<br>nerfed?</h1>
-  <p class="lede">Claude feels dumber lately? Your own logs have the receipts.</p>
+  <p class="lede">Claude feels dumber lately? Your own logs have the proof.</p>
   <div class="cmd">/is-it-nerfed</div>
 </div>
 <div class="panel">
