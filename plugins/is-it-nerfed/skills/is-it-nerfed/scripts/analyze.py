@@ -98,7 +98,8 @@ def session_counts(sessions: List[parse.Session], model: str, window: Window,
                    labels: Dict[str, dict]) -> List[SessionCount]:
     counts = []
     for s in sessions:
-        mine = [labels[p.uuid] for p in s.prompts if _in(p, model, window) and p.uuid in labels]
+        mine = [labels[p.uuid] for p in s.prompts
+                if _in(p, model, window) and p.uuid in labels and labels_mod.is_task(labels[p.uuid])]
         if mine:
             counts.append((s.session_id, sum(labels_mod.is_model_steering(l) for l in mine), len(mine)))
     return counts
@@ -109,23 +110,36 @@ def _version_key(version: str) -> Tuple[Tuple[int, int, str], ...]:
     return tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in version.split("."))
 
 
-def _claude_md_edits(chosen: List[parse.Session]) -> int:
+def _claude_md_versions(chosen: List[parse.Session]) -> Dict[str, set]:
     versions: Dict[str, set] = {}
     for s in chosen:
         for path, digest in s.claude_md_files.items():
             versions.setdefault(path, set()).add(digest)
-    return sum(len(v) - 1 for v in versions.values())
+    return versions
 
 
-def side_changes(sessions: List[parse.Session], model: str, window: Window) -> dict:
+def _claude_md_edits(chosen: List[parse.Session], before: Optional[List[parse.Session]] = None) -> int:
+    """Edits inside the window, or the versions that the earlier sessions never had."""
+    old = _claude_md_versions(before or [])
+    return sum(len(v - old[path]) if path in old else len(v) - 1
+               for path, v in _claude_md_versions(chosen).items())
+
+
+def _window_sessions(sessions: List[parse.Session], model: str, window: Window) -> List[parse.Session]:
+    ids = {p.session_id for s in sessions for p in s.prompts if _in(p, model, window)}
+    return [s for s in sessions if s.session_id in ids]
+
+
+def side_changes(sessions: List[parse.Session], model: str, window: Window,
+                 before: Optional[Window] = None) -> dict:
+    """The setup in a window; with `before`, CLAUDE.md edits count against that earlier window."""
     prompts = [p for s in sessions for p in s.prompts if _in(p, model, window)]
-    ids = {p.session_id for p in prompts}
-    chosen = [s for s in sessions if s.session_id in ids]
+    chosen = _window_sessions(sessions, model, window)
     n_prompts = len(prompts) or 1
     results = sum(p.tool_results for p in prompts)
     shares = Counter(p.project for p in prompts).most_common(3)
     return {
-        "claude_md_edits": _claude_md_edits(chosen),
+        "claude_md_edits": _claude_md_edits(chosen, before and _window_sessions(sessions, model, before)),
         "cli_versions": sorted({p.cli_version for p in prompts if p.cli_version}, key=_version_key),
         "median_prompt_chars": int(statistics.median(len(p.text) for p in prompts)) if prompts else 0,
         "top_projects": [(name, n / n_prompts) for name, n in shares],
@@ -141,7 +155,7 @@ def daily(sessions: List[parse.Session], model: str,
     rows: Dict[date, List[int]] = {d: [0, 0] for d in model_days(sessions, model)}
     for p in model_prompts(sessions, model):
         label = labels.get(p.uuid)
-        if label is not None:
+        if label is not None and labels_mod.is_task(label):
             row = rows[p.timestamp.date()]
             row[0] += labels_mod.is_model_steering(label)
             row[1] += 1
@@ -249,9 +263,9 @@ def run(sessions: List[parse.Session], labels: Dict[str, dict], interp: Dict[str
         prev = session_counts(sessions, out.prev_model, prev_window(sessions, out.prev_model), labels)
         if prev:
             out.compare = stats.cluster_bootstrap(prev, recent_counts)
-            out.compare_verdict = stats.verdict(out.compare)
+            out.compare_verdict = _shown(stats.verdict(out.compare), confirmed=False)
     out.side = {"base": side_changes(sessions, model, base),
-                "recent": side_changes(sessions, model, recent)}
+                "recent": side_changes(sessions, model, recent, before=base)}
     out.harness = _harness(interp, version_dates, windows)
     out.receipts = {"base": receipts(sessions, model, base, labels),
                     "recent": receipts(sessions, model, recent, labels)}

@@ -46,6 +46,10 @@ class BootstrapTest(unittest.TestCase):
         self.assertLessEqual(r.ratio_lo, 1)
         self.assertGreaterEqual(r.ratio_hi, 1)
 
+    def test_ties_count_half(self):
+        r = stats.cluster_bootstrap([("a", 0, 5)] * 6, [("b", 0, 5)] * 6, n=200)
+        self.assertEqual(r.p_worse, 0.5)
+
     def test_empty_side_does_not_crash(self):
         r = stats.cluster_bootstrap([("a", 0, 0)], [("b", 1, 2)], n=50)
         self.assertEqual(r.base_rate, 0)

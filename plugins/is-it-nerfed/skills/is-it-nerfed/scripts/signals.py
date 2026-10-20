@@ -15,13 +15,14 @@ class Signal:
     kind: str  # the event counted
     per: str  # the event it is counted against
     scale: int  # 100 for a percentage, 1000 for "per 1,000"
+    model_side: bool  # the model's own behavior; interrupts are the user's and rise in a hard week too
 
 
 # Pre-declared from the March 2026 regression (anthropics/claude-code#42796), where each moved 3-6x.
 SIGNALS = (
-    Signal("blind edits", "blind_edit", "edit", 100),
-    Signal("interrupts", "interrupt", "tool", 1000),
-    Signal("self-corrections", "self_correction", "tool", 1000),
+    Signal("blind edits", "blind_edit", "edit", 100, True),
+    Signal("interrupts", "interrupt", "tool", 1000, False),
+    Signal("self-corrections", "self_correction", "tool", 1000, True),
 )
 
 
@@ -72,4 +73,4 @@ def compare(base: Dict[str, List[SessionCount]], recent: Dict[str, List[SessionC
 
 
 def confirms_worse(results: List[SignalResult]) -> bool:
-    return any(r.direction == "up" for r in results)
+    return any(r.direction == "up" and r.signal.model_side for r in results)

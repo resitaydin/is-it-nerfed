@@ -80,12 +80,12 @@ class SummaryTest(unittest.TestCase):
     def test_summary_lines_worse(self):
         lines = report.summary(fixture(), REPORT)
         self.assertEqual(lines, [
-            "Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (78% probability).",
-            "Model mistakes: 15 of 160 prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
+            "Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (more mistakes in 78% of resamples).",
+            "Model mistakes: 15 of 160 work prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
             "Agent behavior: Interrupts 3.2× as often as before.",
             "Your setup:     CLAUDE.md changed 2×. Your project mix changed. On the same projects only, it is probably worse.",
-            "Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.",
-            "Confidence:     High. 330 prompts over 27 days.",
+            "Claude Code:    2.1.285: default effort lowered to medium. Same period; not tested as the cause.",
+            "Confidence:     High. 330 work prompts over 27 days.",
             "Report:         /data/report-2026-10-04.html",
         ])
 
@@ -98,9 +98,9 @@ class SummaryTest(unittest.TestCase):
         lines = report.summary(a, REPORT)
         self.assertEqual(lines[:5], [
             "Verdict:        Not nerfed. Opus 5.5 works as well for you as before.",
-            "Model mistakes: 15 of 160 prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
+            "Model mistakes: 15 of 160 work prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
             "Agent behavior: No change in blind edits.",
-            "Your setup:     No change that can affect the result.",
+            "Your setup:     No CLAUDE.md or project mix change.",
             "Claude Code:    2 updates in the recent window. None can change model quality.",
         ])
         a.overlay_ok = False
@@ -120,12 +120,13 @@ class SummaryTest(unittest.TestCase):
         a = fixture()
         cases = {
             "unclear": "No clear change. The data does not show a change either way.",
-            "clearly_worse": "Nerfed for you. Opus 5.5 is clearly worse for you (78% probability).",
-            "leaning_worse": "Possibly nerfed. Opus 5.5 is probably worse for you (78% probability).",
-            "unconfirmed_worse": "Possibly nerfed. You corrected Opus 5.5 more often, "
-                                 "but the agent behavior did not change (78% probability).",
-            "better": "Not nerfed. Opus 5.5 is better for you (22% probability).",
-            "leaning_better": "Not nerfed. Opus 5.5 is probably better for you (22% probability).",
+            "clearly_worse": "Nerfed for you. Opus 5.5 is clearly worse for you (more mistakes in 78% of resamples).",
+            "leaning_worse": "Possibly nerfed. Opus 5.5 is probably worse for you (more mistakes in 78% of resamples). "
+                             "A bad stretch of hard tasks looks the same.",
+            "unconfirmed_worse": "Possibly nerfed. You corrected Opus 5.5 more often (in 78% of resamples), "
+                                 "but its own behavior did not change. A bad stretch of hard tasks looks the same.",
+            "better": "Not nerfed. Opus 5.5 is better for you (fewer mistakes in 22% of resamples).",
+            "leaning_better": "Possibly better. Opus 5.5 is probably better for you (fewer mistakes in 22% of resamples).",
         }
         for verdict, text in cases.items():
             a.verdict = verdict
@@ -157,14 +158,14 @@ class SummaryTest(unittest.TestCase):
     def test_summary_confidence_low_and_medium(self):
         a = fixture()
         a.boot.n_base = 40
-        self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Low. Only 40 prompts in one window.")
+        self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Low. Only 40 work prompts in one window.")
         a.boot.n_base = 100
-        self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Medium. 270 prompts over 27 days.")
+        self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Medium. 270 work prompts over 27 days.")
 
     def test_summary_too_early(self):
         lines = report.summary(too_early(), REPORT)
         self.assertEqual(lines, [
-            "Verdict:        Too early: fewer than 3 active days, no verdict yet (16 labeled prompts on 2 days).",
+            "Verdict:        Too early: fewer than 3 active days, no verdict yet (16 labeled work prompts on 2 days).",
             "Report:         /data/report-2026-10-04.html",
         ])
 
@@ -231,18 +232,18 @@ class ChartTest(unittest.TestCase):
 class RenderTest(unittest.TestCase):
     def test_render_sections_in_order(self):
         out = report.render(fixture())
-        heads = ["Nerfed for you", "Probable cause", "Your setup</h2>", "Claude Code</h2>", "Model mistakes</h2>",
+        heads = ["Nerfed for you", "In the same period", "Your setup</h2>", "Claude Code</h2>", "Model mistakes</h2>",
                  "Agent behavior</h2>", "Model mistakes by day", "Examples where you corrected the model", "All numbers", "How this works"]
         positions = [out.index(h) for h in heads]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn('<p class="verdict-text">Opus 5.5 is slightly worse for you (78% probability).</p>', out)
+        self.assertIn('<p class="verdict-text">Opus 5.5 is slightly worse for you (more mistakes in 78% of resamples).</p>', out)
 
     def test_render_verdict_names_the_probable_cause_only_when_worse(self):
         out = report.render(fixture())
-        self.assertIn("<strong>Probable cause:</strong> Claude Code 2.1.285: default effort lowered to medium.", out)
+        self.assertIn("<strong>In the same period:</strong> Claude Code 2.1.285: default effort lowered to medium. Not tested as the cause.", out)
         a = fixture()
         a.verdict = "no_change"
-        self.assertNotIn("Probable cause", report.render(a))
+        self.assertNotIn("In the same period", report.render(a))
 
     def test_render_shows_each_fact_once(self):
         out = report.render(fixture())
@@ -261,7 +262,7 @@ class RenderTest(unittest.TestCase):
 
     def test_render_verdict_shows_confidence_level(self):
         out = report.render(fixture())
-        self.assertIn('<strong>High confidence</strong> 330 prompts over 27 days.', out)
+        self.assertIn('<strong>High confidence</strong> 330 work prompts over 27 days.', out)
         self.assertEqual(out.count('<i class="on">'), 3)
 
     def test_render_header_without_model_asks_generic_question(self):
@@ -288,6 +289,12 @@ class RenderTest(unittest.TestCase):
         out = report.render(a)
         self.assertIn(">Too few events<", out)
 
+    def test_unclear_is_low_confidence_and_not_same(self):
+        a = fixture()
+        a.verdict = "unclear"
+        self.assertEqual(report._confidence(a)[0], "Low")
+        self.assertIn(">Unclear<", report._mistakes_status(a))
+
     def test_render_mistakes_with_too_few_events_is_not_same(self):
         a = fixture()
         a.verdict = "too_few_events"
@@ -311,8 +318,8 @@ class RenderTest(unittest.TestCase):
     def test_render_mistakes_as_figures_with_counts(self):
         out = report.render(fixture())
         self.assertIn('class="verdict critical"', out)
-        self.assertIn('<span class="figure">9%</span><span class="caption"><strong>Before</strong><br>15 of 160 prompts', out)
-        self.assertIn('<span class="figure now">15%</span><span class="caption"><strong>Now</strong><br>26 of 170 prompts', out)
+        self.assertIn('<span class="figure">9%</span><span class="caption"><strong>Before</strong><br>15 of 160 work prompts', out)
+        self.assertIn('<span class="figure now">15%</span><span class="caption"><strong>Now</strong><br>26 of 170 work prompts', out)
 
     def test_render_no_change_chip_when_no_prompt_has_a_mistake(self):
         a = fixture()

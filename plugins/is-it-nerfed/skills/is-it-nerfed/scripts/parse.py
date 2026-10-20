@@ -84,10 +84,13 @@ def find_roots(home: Path, env: Mapping[str, str]) -> List[Path]:
 
 
 def load_sessions(roots: List[Path]) -> List[Session]:
-    sessions = []
+    """A prompt in two log folders (a copied config folder) counts once."""
+    sessions, seen = [], set()
     for root in roots:
         for path in sorted(root.glob("projects/*/*.jsonl")):
             session = parse_session(path)
+            session.prompts = [p for p in session.prompts if p.uuid not in seen]
+            seen.update(p.uuid for p in session.prompts)
             if session.prompts:
                 sessions.append(session)
     return sessions
@@ -183,7 +186,7 @@ def _read_user(line: dict, session: Session, state: _State) -> None:
         project=session.project,
         timestamp=parse_time(line.get("timestamp", "")),
         text=text,
-        model=None,
+        model=state.model,
         cli_version=line.get("version", ""),
         is_first=not is_command and state.agent_id is None,  # no agent reply yet: nothing to steer
         is_command=is_command,

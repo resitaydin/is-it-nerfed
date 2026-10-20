@@ -21,16 +21,44 @@ In any Claude Code session, type `/is-it-nerfed`, or just ask "did Claude get du
 Claude shows the token cost and the time, and asks before it starts. You get 7 lines:
 
 ```
-Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (78% probability).
-Model mistakes: 15 of 160 prompts before (9%, Sep 24-28), 26 of 170 now (15%, Sep 30-Oct 4).
-Agent behavior: Interrupts 3.2× as often as before.
-Your setup:     CLAUDE.md changed 2×.
-Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.
-Confidence:     Medium. 330 prompts over 10 days.
+Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (more mistakes in 97% of resamples).
+Model mistakes: 15 of 160 work prompts before (9%, Sep 24-28), 26 of 170 now (15%, Sep 30-Oct 4).
+Agent behavior: Self-corrections 3.2× as often as before.
+Your setup:     No CLAUDE.md or project mix change.
+Claude Code:    2.1.285: default effort lowered to medium. Same period; not tested as the cause.
+Confidence:     Medium. 330 work prompts over 10 days.
 Report:         ~/.is-it-nerfed/report-2026-10-04.html
 ```
 
 The HTML report adds a chart, the Claude Code releases, and the status incidents in that time.
+
+## Method and sources
+
+- **Your own logs, not a benchmark.** A study of 6,852 real Claude Code sessions found the March
+  2026 regression before Anthropic confirmed it
+  ([The Register](https://www.theregister.com/2026/04/06/anthropic_claude_code_dumber_lazier_amd_ai_director/)).
+- **Claude Code updates and incidents go in the report.** Past regressions were harness and serving
+  bugs, not new weights ([Anthropic, Sep 2025](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues),
+  [Anthropic, Apr 2026](https://www.anthropic.com/engineering/april-23-postmortem)). The report shows
+  them as "in the same period", because it does not test them as the cause.
+- **A blind Sonnet judge.** It does not see dates, versions or model names, and it labels both
+  windows in the same run. Opus does not judge, because judges prefer their own model's work
+  ([Panickssery et al.](https://arxiv.org/pdf/2404.13076)).
+- **Hidden anchor items** with known labels catch a judge that drifts
+  ([arXiv 2606.15474](https://arxiv.org/html/2606.15474)). The judge was scored with kappa, not
+  percent agreement ([arXiv 2606.19544](https://arxiv.org/abs/2606.19544)). See
+  [eval/README.md](eval/README.md) for the scores.
+- **Whole sessions are resampled**, because prompts in one session are not independent
+  ([Miller 2024](https://arxiv.org/html/2411.00640)).
+- **"No change" needs proof.** The verdict says "no change" only when the interval of the rate
+  ratio is inside ×0.67 to ×1.5, as in an equivalence test
+  ([Lakens](https://lakens.github.io/statistical_inferences/09-equivalencetest.html),
+  [Kruschke 2018](https://journals.sagepub.com/doi/10.1177/2515245918771304)).
+- **The limit.** Two windows of two weeks cannot separate a model change from a bad stretch of hard
+  tasks. So a firm "worse" also needs the model's own behavior to change, and every "possibly"
+  verdict says so. The [bias audit](eval/README.md#bias-audit-2026-10-21) has the numbers.
+
+The research notes behind these choices are in [docs/research/](docs/research/).
 
 ## Privacy
 

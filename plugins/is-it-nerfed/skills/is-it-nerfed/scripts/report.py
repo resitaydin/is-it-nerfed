@@ -14,32 +14,33 @@ from analyze import Analysis
 from signals import SignalResult
 from stats import MIN_EVENTS, Window
 
+BAD_STRETCH = " A bad stretch of hard tasks looks the same."
 # Per verdict: the status icon, the word (the HTML badge and the first terminal sentence),
 # the short text, and the detail sentence.
 VERDICTS: Dict[str, Tuple[str, str, str, str]] = {
     "no_change": ("good", "Not nerfed", "no change", "%(name)s works as well for you as before."),
-    "better": ("good", "Not nerfed", "better", "%(name)s is better for you (%(p)s probability)."),
-    "leaning_better": ("good", "Not nerfed", "probably better",
-                       "%(name)s is probably better for you (%(p)s probability)."),
+    "better": ("good", "Not nerfed", "better", "%(name)s is better for you (fewer mistakes in %(p)s of resamples)."),
+    "leaning_better": ("good", "Possibly better", "probably better",
+                       "%(name)s is probably better for you (fewer mistakes in %(p)s of resamples)."),
     "unclear": ("neutral", "No clear change", "no clear change", "The data does not show a change either way."),
     "too_few_events": ("neutral", "Not enough data", "too few model mistakes to measure",
                        "The judge found only %(events)d model mistakes in both windows; a verdict needs %(min)d."),
     "slightly_worse": ("critical", "Nerfed for you", "slightly worse",
-                       "%(name)s is slightly worse for you (%(p)s probability)."),
+                       "%(name)s is slightly worse for you (more mistakes in %(p)s of resamples)."),
     "clearly_worse": ("critical", "Nerfed for you", "clearly worse",
-                      "%(name)s is clearly worse for you (%(p)s probability)."),
+                      "%(name)s is clearly worse for you (more mistakes in %(p)s of resamples)."),
     "leaning_worse": ("warning", "Possibly nerfed", "probably worse",
-                      "%(name)s is probably worse for you (%(p)s probability)."),
-    "unconfirmed_worse": ("warning", "Possibly nerfed", "probably worse, but agent behavior did not change",
-                          "You corrected %(name)s more often, but the agent behavior did not change "
-                          "(%(p)s probability)."),
+                      "%(name)s is probably worse for you (more mistakes in %(p)s of resamples)." + BAD_STRETCH),
+    "unconfirmed_worse": ("warning", "Possibly nerfed", "probably worse, but the model's own behavior did not change",
+                          "You corrected %(name)s more often (in %(p)s of resamples), but its own behavior "
+                          "did not change." + BAD_STRETCH),
 }
 WORSE = {v for v, (kind, _, _, _) in VERDICTS.items() if kind in ("critical", "warning")}
 BETTER = {"better", "leaning_better"}
 STATUS_TEXT: Dict[str, str] = {
     "too_early": "too early: fewer than 3 active days, no verdict yet",
     "judge_drift": "no verdict: the judge got only %s of the test prompts right (it needs 80%%)",
-    "no_labels": "no verdict: one window has no labeled prompts",
+    "no_labels": "no verdict: one window has no labeled work prompts",
 }
 ROLL_DAYS = 5
 SHORT_TAIL = 30
@@ -138,7 +139,7 @@ def _marker_label(kind: str, label: str) -> str:
 def _counts(a: Analysis) -> str:
     if not a.daily:
         return ""
-    return " (%d labeled prompts on %d days)" % (sum(n for _, _, n in a.daily), len(a.daily))
+    return " (%d labeled work prompts on %d days)" % (sum(n for _, _, n in a.daily), len(a.daily))
 
 
 def _no_verdict_text(a: Analysis) -> str:
@@ -166,7 +167,7 @@ def _verdict_text(a: Analysis) -> str:
 
 def _mistakes_text(a: Analysis) -> str:
     b = a.boot
-    return "%d of %d prompts before (%s, %s), %d of %d now (%s, %s)." % (
+    return "%d of %d work prompts before (%s, %s), %d of %d now (%s, %s)." % (
         b.k_base, b.n_base, _pct(b.base_rate), span(a.base),
         b.k_recent, b.n_recent, _pct(b.recent_rate), span(a.recent))
 
@@ -200,12 +201,12 @@ def _setup_parts(a: Analysis) -> List[Tuple[str, str]]:
 
 
 def _setup_text(a: Analysis) -> str:
-    return " ".join(text for _, text in _setup_parts(a)) or "No change that can affect the result."
+    return " ".join(text for _, text in _setup_parts(a)) or "No CLAUDE.md or project mix change."
 
 
 def _claude_code_text(a: Analysis) -> str:
     if a.attribution and a.verdict in WORSE:
-        return "; ".join(a.attribution) + ". This can explain the drift."
+        return "; ".join(a.attribution) + ". Same period; not tested as the cause."
     new = [v for v in a.side["recent"]["cli_versions"] if v not in a.side["base"]["cli_versions"]]
     if not new:
         return "No update in the recent window."
@@ -225,9 +226,11 @@ def _confidence(a: Analysis) -> Tuple[str, str]:
             recent_days, "" if recent_days == 1 else "s", _day(a.recent[1] + timedelta(days=LOW_DAYS - recent_days)))
     fewest = min(b.n_base, b.n_recent)
     if fewest < LOW_PROMPTS:
-        return "Low", "Only %d prompts in one window." % fewest
-    level = "High" if recent_days >= HIGH_DAYS and fewest >= HIGH_PROMPTS else "Medium"
-    return level, "%d prompts over %d days." % (b.n_base + b.n_recent, len(labeled))
+        return "Low", "Only %d work prompts in one window." % fewest
+    reason = "%d work prompts over %d days." % (b.n_base + b.n_recent, len(labeled))
+    if a.verdict in ("too_few_events", "unclear"):
+        return "Low", reason  # much data, but it does not separate a change from chance
+    return ("High" if recent_days >= HIGH_DAYS and fewest >= HIGH_PROMPTS else "Medium"), reason
 
 
 def _confidence_text(a: Analysis) -> str:
@@ -380,7 +383,7 @@ def _verdict_panel(a: Analysis) -> str:
     level, reason = _confidence(a)
     cause = ""
     if a.verdict in WORSE and a.attribution:
-        cause = '<p class="cause">%s<span><strong>Probable cause:</strong> Claude Code %s.</span></p>' % (
+        cause = '<p class="cause">%s<span><strong>In the same period:</strong> Claude Code %s. Not tested as the cause.</span></p>' % (
             _icon("terminal-2"), escape("; ".join(a.attribution)))
     return ('<section class="verdict %s"><span class="verdict-icon">%s</span><div>'
             '<p class="verdict-word">%s</p><p class="verdict-text">%s</p>%s'
@@ -400,6 +403,8 @@ def _mistakes_status(a: Analysis) -> str:
         return _status("good", "Lower")
     if a.verdict == "too_few_events":
         return _status("neutral", "Too few events")
+    if a.verdict == "unclear":
+        return _status("neutral", "Unclear")
     return _status("good", "Same")
 
 
@@ -412,7 +417,7 @@ def _delta(a: Analysis) -> str:
 def _mistakes_figures(a: Analysis) -> str:
     """The two rates as large figures with their counts; no change chip when no prompt has a mistake."""
     b = a.boot
-    figure = ('<div><span class="figure%s">%s</span><span class="caption"><strong>%s</strong><br>%d of %d prompts'
+    figure = ('<div><span class="figure%s">%s</span><span class="caption"><strong>%s</strong><br>%d of %d work prompts'
               '</span>%s</div>')
     return ('<div class="figures">%s<span class="arrow" aria-hidden="true">→</span>%s</div>'
             % (figure % ("", _pct(b.base_rate), "Before", b.k_base, b.n_base, ""),

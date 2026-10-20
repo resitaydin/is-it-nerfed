@@ -1,6 +1,6 @@
-{"type":"user","uuid":"n1","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:00:00.000Z","message":{"role":"user","content":"Real prompt"}}
-{"type":"user","uuid":"n2","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:01:00.000Z","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation."}}
-{"type":"user","uuid":"n3","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:02:00.000Z","isVisibleInTranscriptOnly":true,"message":{"role":"user","content":"Summary shown in the transcript only"}}
-{"type":"user","uuid":"n4","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:03:00.000Z","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}
-{"type":"user","uuid":"n5","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:04:00.000Z","message":{"role":"user","content":"Second real prompt"}}
-{"type":"user","uuid":"n6","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:05:00.000Z","message":{"role":"user","content":"<command-message>review is running</command-message>\n<command-name>/review</command-name>"}}
+{"type":"user","uuid":"non_human-n1","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:00:00.000Z","message":{"role":"user","content":"Real prompt"}}
+{"type":"user","uuid":"non_human-n2","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:01:00.000Z","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation."}}
+{"type":"user","uuid":"non_human-n3","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:02:00.000Z","isVisibleInTranscriptOnly":true,"message":{"role":"user","content":"Summary shown in the transcript only"}}
+{"type":"user","uuid":"non_human-n4","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:03:00.000Z","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}
+{"type":"user","uuid":"non_human-n5","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:04:00.000Z","message":{"role":"user","content":"Second real prompt"}}
+{"type":"user","uuid":"non_human-n6","sessionId":"non_human","version":"2.1.281","timestamp":"2026-09-02T10:05:00.000Z","message":{"role":"user","content":"<command-message>review is running</command-message>\n<command-name>/review</command-name>"}}

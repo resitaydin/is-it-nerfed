@@ -60,6 +60,11 @@ def read_labels(paths: List[Path], items_by_id: Dict[str, dict]) -> Tuple[Dict[s
     return found, [i for i in items_by_id if i not in found]
 
 
+def is_task(label: dict) -> bool:
+    """A prompt that answers or asks for work: "continue", "yes" and "thanks" are not chances for a mistake."""
+    return label.get("kind") in ("steering", "new_work")
+
+
 def is_model_steering(label: dict) -> bool:
     return label.get("kind") == "steering" and label.get("cause") == "model"
 

@@ -23,10 +23,12 @@ def perfect_labels(anchors):
 class AnchorSetTest(unittest.TestCase):
     def test_anchor_count_and_mix(self):
         anchors = load_anchors()
-        self.assertEqual(len(anchors), 30)
-        self.assertEqual(len({a["anchor_id"] for a in anchors}), 30)
+        self.assertEqual(len(anchors), 27)
+        self.assertEqual(len({a["anchor_id"] for a in anchors}), 27)
+        # Real items always answer an agent reply, so an anchor with no reply would stand out.
+        self.assertTrue(all(a["previous_agent_reply"].strip() for a in anchors))
         mix = Counter((a["gold_kind"], a["gold_cause"]) for a in anchors)
-        self.assertEqual(mix, Counter({("new_work", "unclear"): 8, ("steering", "model"): 10,
+        self.assertEqual(mix, Counter({("new_work", "unclear"): 5, ("steering", "model"): 10,
                                        ("steering", "user"): 6, ("steering", "unclear"): 2,
                                        ("other", "unclear"): 4}))
         for a in anchors:

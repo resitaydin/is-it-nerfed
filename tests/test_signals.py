@@ -17,8 +17,8 @@ def session(sid, day, kinds, model=OPUS5):
                          events=[parse.Event(when, model, k) for k in kinds])
 
 
-def calls(tools, interrupts):
-    return ["tool"] * tools + ["interrupt"] * interrupts
+def calls(tools, interrupts, fixes=0):
+    return ["tool"] * tools + ["interrupt"] * interrupts + ["self_correction"] * fixes
 
 
 class SessionCountsTest(unittest.TestCase):
@@ -33,7 +33,7 @@ class SessionCountsTest(unittest.TestCase):
 
 
 class CompareTest(unittest.TestCase):
-    def test_interrupts_up_confirms_worse(self):
+    def test_interrupts_up_alone_do_not_confirm_worse(self):
         base = [session("b%d" % i, date(2026, 9, 1 + i), calls(100, 1)) for i in range(10)]
         recent = [session("r%d" % i, date(2026, 9, 15 + i), calls(100, 6)) for i in range(10)]
         both = base + recent
@@ -43,6 +43,14 @@ class CompareTest(unittest.TestCase):
         self.assertAlmostEqual(r.base_rate, 10.0)
         self.assertAlmostEqual(r.recent_rate, 60.0)
         self.assertGreater(r.lo, 1)
+        # Interrupts are the user's behavior: they rise in a bad stretch of hard tasks too.
+        self.assertFalse(signals.confirms_worse(results))
+
+    def test_self_corrections_up_confirm_worse(self):
+        base = [session("b%d" % i, date(2026, 9, 1 + i), calls(100, 0, fixes=1)) for i in range(10)]
+        recent = [session("r%d" % i, date(2026, 9, 15 + i), calls(100, 0, fixes=6)) for i in range(10)]
+        results = signals.compare(*(signals.window_counts(base + recent, OPUS5, w) for w in (BASE, RECENT)))
+        self.assertEqual([r.signal.name for r in results], ["self-corrections"])
         self.assertTrue(signals.confirms_worse(results))
 
     def test_signal_with_too_few_events_gives_no_result(self):

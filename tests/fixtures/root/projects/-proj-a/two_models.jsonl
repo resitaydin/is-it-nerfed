@@ -1,4 +1,4 @@
-{"type":"user","uuid":"u1","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:00:00.000Z","message":{"role":"user","content":"Write a parser"}}
-{"type":"assistant","uuid":"a1","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:00:05.000Z","message":{"id":"msg_1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Done."}],"usage":{"output_tokens":10}}}
-{"type":"user","uuid":"u2","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:05:00.000Z","message":{"role":"user","content":"Now add tests"}}
-{"type":"assistant","uuid":"a2","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:05:05.000Z","message":{"id":"msg_2","model":"claude-sonnet-5-5","role":"assistant","content":[{"type":"text","text":"Added."}],"usage":{"output_tokens":10}}}
+{"type":"user","uuid":"two_models-u1","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:00:00.000Z","message":{"role":"user","content":"Write a parser"}}
+{"type":"assistant","uuid":"two_models-a1","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:00:05.000Z","message":{"id":"msg_1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Done."}],"usage":{"output_tokens":10}}}
+{"type":"user","uuid":"two_models-u2","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:05:00.000Z","message":{"role":"user","content":"Now add tests"}}
+{"type":"assistant","uuid":"two_models-a2","sessionId":"two_models","version":"2.1.280","timestamp":"2026-09-02T09:05:05.000Z","message":{"id":"msg_2","model":"claude-sonnet-5-5","role":"assistant","content":[{"type":"text","text":"Added."}],"usage":{"output_tokens":10}}}

@@ -74,7 +74,7 @@ class CliTest(unittest.TestCase):
         labels = []
         for item in self.batch_items(scan):
             anchor = gold_by_id.get(item["id"])
-            labels.append({"id": item["id"], "kind": anchor["gold_kind"] if anchor else "other",
+            labels.append({"id": item["id"], "kind": anchor["gold_kind"] if anchor else "new_work",
                            "steering_type": anchor["gold_steering_type"] if anchor else None,
                            "cause": anchor["gold_cause"] if anchor else "unclear",
                            "evidence": item["prompt"], "reasoning": "test"})
@@ -93,7 +93,7 @@ class CliTest(unittest.TestCase):
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.strip().splitlines()
-        self.assertIn("Not enough data", lines[0])  # every real prompt is labeled "other"
+        self.assertIn("Not enough data", lines[0])  # no real prompt is labeled a model mistake
         self.assertTrue(lines[-1].startswith("Report:"))
         self.assertTrue((self.data / ("report-%s.html" % TODAY)).exists())
 
@@ -123,7 +123,7 @@ class CliTest(unittest.TestCase):
         self.scan()
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("no labeled prompts", result.stdout)
+        self.assertIn("no labeled work prompts", result.stdout)
         self.assertNotIn("judge", result.stdout)
 
     def test_no_logs_exit_2(self):
@@ -154,7 +154,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(self.run_cli("report", "--final").returncode, 0)
         self.scan()
         result = self.run_cli("report", "--final")
-        self.assertIn("no labeled prompts", result.stdout)
+        self.assertIn("no labeled work prompts", result.stdout)
 
     def test_scan_caps_each_window_at_200(self):
         shutil.rmtree(self.home / ".claude")

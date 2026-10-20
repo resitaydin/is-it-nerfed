@@ -27,6 +27,10 @@ BLIND_PATTERNS = [re.compile(p) for p in (
     r"claude-[\w.-]+",
     r"(?i:\b(?:opus|sonnet|haiku|fable)(?:[ -]?\d+(?:[.-]\d+)*)?(?![a-z]))",
     r"\bv?\d+\.\d+\.\d+\b",
+    r"\bv\d+(?:\.\d+)?\b",
+    r"(?<!\d)20\d{6}(?!\d)",
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+    r"(?i:\bclaude[ -]?\d+(?:\.\d+)*\b)",
     r"(?i:\b(?:nerf\w*|dumber|degraded)\b)",
 )]
 

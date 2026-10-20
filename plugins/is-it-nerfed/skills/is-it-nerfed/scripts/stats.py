@@ -108,7 +108,7 @@ def cluster_bootstrap(base: List[SessionCount], recent: List[SessionCount],
     ratio_lo, ratio_hi = _interval(sorted(ratios))
     return BootResult(
         diff=rate(recent) - rate(base),
-        p_worse=sum(d > 0 for d in diffs) / n,
+        p_worse=(sum(d > 0 for d in diffs) + 0.5 * sum(d == 0 for d in diffs)) / n,
         base_rate=rate(base),
         recent_rate=rate(recent),
         k_base=k_base,

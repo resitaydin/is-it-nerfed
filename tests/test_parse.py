@@ -182,7 +182,7 @@ class ParseSessionTest(unittest.TestCase):
         self.assertEqual(self.basic.project, "-proj-a")
         self.assertEqual(self.basic.session_id, "basic")
         self.assertEqual(first.model, "claude-opus-5-5")
-        self.assertIsNone(second.model)
+        self.assertEqual(second.model, "claude-opus-5-5")  # it answers the Opus reply
         self.assertEqual(first.prev_agent_text, "")
         self.assertEqual(second.prev_agent_text, "I will look at it.")
         self.assertEqual(second.history, ["Fix the login bug"])
@@ -190,10 +190,11 @@ class ParseSessionTest(unittest.TestCase):
         self.assertEqual(second.cli_version, "2.1.281")
         self.assertEqual(first.timestamp.isoformat(), "2026-09-01T10:00:01+00:00")
 
-    def test_model_per_prompt(self):
+    def test_model_per_prompt_is_the_model_of_the_reply_it_answers(self):
         session = parse.parse_session(PROJ / "two_models.jsonl")
         models = [p.model for p in session.prompts]
-        self.assertEqual(models, ["claude-opus-5-5", "claude-sonnet-5-5"])
+        # The first prompt answers no reply, so it takes the model of the next one.
+        self.assertEqual(models, ["claude-opus-5-5", "claude-opus-5-5"])
 
     def test_truncated_line_skipped(self):
         session = parse.parse_session(PROJ / "truncated.jsonl")
@@ -221,6 +222,17 @@ class LoadSessionsTest(unittest.TestCase):
         self.assertNotIn("own_run", ids)
         self.assertNotIn("own_run_tool", ids)
         self.assertEqual(ids, {"basic", "two_models", "truncated", "non_human", "signals"})
+
+    def test_a_prompt_in_two_log_folders_counts_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for root in ("a", "b"):
+                proj = Path(tmp) / root / "projects" / "-p"
+                proj.mkdir(parents=True)
+                (proj / "basic.jsonl").write_text((PROJ / "basic.jsonl").read_text())
+            sessions = parse.load_sessions([Path(tmp) / "a", Path(tmp) / "b"])
+            uuids = [p.uuid for s in sessions for p in s.prompts]
+            self.assertEqual(len(uuids), len(set(uuids)))
+            self.assertEqual(len(sessions), 1)
 
     def test_subagents_and_empty_sessions_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:

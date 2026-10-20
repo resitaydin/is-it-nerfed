@@ -27,7 +27,7 @@ def make_session(sid, day, model, project="p1", n=2, version="2.1.0", **kw):
 
 
 def label(steer: bool) -> dict:
-    return {"kind": "steering" if steer else "other", "steering_type": "x",
+    return {"kind": "steering" if steer else "new_work", "steering_type": "x",
             "cause": "model" if steer else "none", "evidence": "quote", "reasoning": "why"}
 
 
@@ -116,6 +116,30 @@ class SideChangeTests(unittest.TestCase):
                                      {"/a/CLAUDE.md": "h3"}, {"/a/CLAUDE.md": "h3"}]), 2)
 
 
+class RateTest(unittest.TestCase):
+    def test_fewer_other_prompts_do_not_change_the_rate(self):
+        # Base sessions: 1 steering, 3 new_work, 4 other. Recent sessions: the same, but 1 other.
+        sessions = days_sessions(20, n=8)
+        labels = {}
+        for s in sessions:
+            others = 1 if s.prompts[0].timestamp.date() >= day_n(10) else 4
+            kinds = ["steering"] + ["new_work"] * 3 + ["other"] * others
+            for p, kind in zip(s.prompts, kinds):
+                labels[p.uuid] = dict(label(kind == "steering"), kind=kind)
+        base, recent = (analyze.session_counts(sessions, OPUS5, w, labels) for w in analyze.windows_for(sessions, OPUS5))
+        self.assertEqual(sum(c[2] for c in base) / sum(c[1] for c in base), 4)
+        self.assertEqual(sum(c[2] for c in recent) / sum(c[1] for c in recent), 4)
+
+
+class ClaudeMdChangeTest(unittest.TestCase):
+    def test_a_new_version_in_the_recent_window_is_a_change(self):
+        sessions = days_sessions(20)
+        for s in sessions:
+            s.claude_md_files = {"/a/CLAUDE.md": "h1" if s.prompts[0].timestamp.date() < day_n(10) else "h2"}
+        analysis = run(sessions, labels_for(sessions, lambda d: False))
+        self.assertEqual(analysis.side["recent"]["claude_md_edits"], 1)
+
+
 class VersionOrderTests(unittest.TestCase):
     def test_cli_versions_sort_numerically(self):
         sessions = [make_session("v1", day_n(0), OPUS5, version="2.1.100"),
@@ -174,6 +198,8 @@ class RunTests(unittest.TestCase):
         self.assertEqual(analysis.receipts["recent"][0]["quote"], "quote")
         self.assertEqual(analysis.receipts["base"], [])
         self.assertIsNotNone(analysis.compare)
+        # No behavior check covers the previous model, so its verdict is never a firm "worse".
+        self.assertNotIn(analysis.compare_verdict, analyze.FIRM_WORSE)
         self.assertIn("recent", analysis.side)
 
     def test_firm_worse_needs_a_behavior_signal(self):
@@ -185,7 +211,7 @@ class RunTests(unittest.TestCase):
         for s in sessions:
             when = s.prompts[0].timestamp
             late = when.date() >= day_n(10)
-            s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["interrupt"] * (6 if late else 1)]
+            s.events = [parse.Event(when, OPUS5, k) for k in ["tool"] * 100 + ["self_correction"] * (6 if late else 1)]
         confirmed = run(sessions, labels)
         self.assertIn(confirmed.verdict, analyze.FIRM_WORSE)
         self.assertEqual(confirmed.signals[0].direction, "up")

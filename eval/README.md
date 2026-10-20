@@ -118,5 +118,36 @@ The 2026-10-04 rows came from three faults, which the 2026-10-14 rows do not hav
   the tool calls. A signal now needs 10 events in both windows together.
 
 The planted-signal results from 2026-10-04 are removed, because they planted extra blind edits on
-top of the false ones. On these logs, only interrupts have enough events to measure, so a firm
-"worse" verdict is confirmed only when interrupts rise.
+top of the false ones. On these logs, only interrupts have enough events to measure.
+
+## Bias audit (2026-10-21)
+
+A simulation with no model change: 40 days, 3 sessions per day, 8 prompts per session, a 5% rate,
+300 runs per row. "Triggered" keeps only runs where the last 4 days had 1.5× the mean rate, because
+users run the tool after a bad stretch.
+
+| Case | Firm worse | Leaning worse | Better or leaning better |
+| ---- | ---------- | ------------- | ------------------------ |
+| Independent sessions | 1% | 10% | 19% |
+| Weekly difficulty, sd 0.5 | 9% | 16% | 32% |
+| Triggered | 4% | 23% | 3% |
+| Triggered, weekly sd 0.3 | 10% | 26% | 4% |
+
+Resampling days instead of sessions changed these numbers by 1 point or less: the variation comes
+from whole weeks, and two 14-day windows hold only two weeks each. So the data cannot separate a
+hard stretch from a model change. The fixes are:
+
+- Interrupts no longer confirm a firm "worse". They are the user's behavior and rise in a hard week
+  too. Only the model's own behavior (blind edits, self-corrections) confirms it. Without it, the
+  verdict is "Possibly nerfed", and it says that a bad stretch of hard tasks looks the same.
+- The report says "more mistakes in 78% of resamples", not "78% probability".
+- A Claude Code update or incident in the recent window is "in the same period; not tested as the
+  cause", not a "probable cause".
+- The rate counts only work prompts (steering and new work), so fewer "continue" or "yes" prompts
+  cannot raise it.
+- A tie between the windows counts half toward "worse". The mean p_worse with no change moved from
+  0.453 to 0.473 (300 runs, standard error about 0.017).
+- A CLAUDE.md version that the base window never had counts as a change.
+- A prompt belongs to the model of the reply that it answers, and a prompt in two log folders counts
+  once.
+- The 3 anchors with no agent reply are removed, because real items always answer a reply.

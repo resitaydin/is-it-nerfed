@@ -52,6 +52,11 @@ class BlindTest(unittest.TestCase):
         for text, expected in cases.items():
             self.assertEqual(sample.blind(text), expected)
 
+    def test_blind_other_date_and_version_forms(self):
+        out = sample.blind("see 20261021_add_index.py from 10/21/2026, v2.1 and Claude 4 too")
+        for word in ("20261021", "10/21", "v2.1", "Claude 4"):
+            self.assertNotIn(word, out)
+
     def test_blind_every_nerf_word(self):
         self.assertEqual(sample.blind("Nerfs, nerfing and nerf"), "[x], [x] and [x]")
 
