@@ -83,7 +83,7 @@ class SummaryTest(unittest.TestCase):
             "Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (78% probability).",
             "Model mistakes: 15 of 160 prompts before (9%, Sep 7-20), 26 of 170 now (15%, Sep 21-Oct 4).",
             "Agent behavior: Interrupts 3.2× as often as before.",
-            "Your setup:     CLAUDE.md changed 2×. Main project changed: ai-team-journey-analyzer → is-it-nerfed.",
+            "Your setup:     CLAUDE.md changed 2×. Your project mix changed. On the same projects only, it is probably worse.",
             "Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.",
             "Confidence:     High. 330 prompts over 27 days.",
             "Report:         /data/report-2026-10-04.html",
@@ -94,7 +94,7 @@ class SummaryTest(unittest.TestCase):
         a.verdict = "no_change"
         a.signals = [SignalResult(SIGNALS[0], 8.0, 9.1, 1.1, 0.7, 1.6)]
         a.side["recent"] = dict(a.side["base"], cli_versions=["2.1.280", "2.1.285", "2.1.289"])
-        a.attribution = []
+        a.attribution, a.shared_verdict = [], None
         lines = report.summary(a, REPORT)
         self.assertEqual(lines[:5], [
             "Verdict:        Not nerfed. Opus 5.5 works as well for you as before.",
@@ -149,15 +149,12 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(report.summary(a, REPORT)[5],
                          "Confidence:     Low. Only 3 recent days. Run again after Oct 6.")
 
-    def test_summary_project_names_shortened_as_a_pair(self):
+    def test_summary_setup_names_the_project_mix_only_when_it_changes_the_verdict(self):
         a = fixture()
-        other = "-Users-resit-other-x"
-        a.side["base"]["top_projects"] = [(DIR + "ai-team-synthetic-cro-engine-ai-610-make-audience-creation", 0.6),
-                                          (other, 0.4)]
-        a.side["recent"]["top_projects"] = [(DIR + "ai-team-synthetic-cro-engine-launch-ready", 0.7), (other, 0.3)]
-        self.assertEqual(report.summary(a, REPORT)[3],
-                         "Your setup:     CLAUDE.md changed 2×. Main project changed: "
-                         "ai-610-make-audience-creation → launch-ready.")
+        a.shared_verdict = None
+        self.assertEqual(report.summary(a, REPORT)[3], "Your setup:     CLAUDE.md changed 2×.")
+
+    def test_summary_confidence_low_and_medium(self):
         a = fixture()
         a.boot.n_base = 40
         self.assertEqual(report.summary(a, REPORT)[5], "Confidence:     Low. Only 40 prompts in one window.")
@@ -234,19 +231,38 @@ class ChartTest(unittest.TestCase):
 class RenderTest(unittest.TestCase):
     def test_render_sections_in_order(self):
         out = report.render(fixture())
-        heads = ["Nerfed for you", "Model mistakes", "Agent behavior", "Your setup", "Claude Code",
-                 "Model mistakes by day", "Examples where you corrected the model", "All numbers", "How this works"]
+        heads = ["Nerfed for you", "Probable cause", "Your setup</h2>", "Claude Code</h2>", "Model mistakes</h2>",
+                 "Agent behavior</h2>", "Model mistakes by day", "Examples where you corrected the model", "All numbers", "How this works"]
         positions = [out.index(h) for h in heads]
         self.assertEqual(positions, sorted(positions))
         self.assertIn('<p class="verdict-text">Opus 5.5 is slightly worse for you (78% probability).</p>', out)
-        self.assertIn("<p>15 of 160 prompts before, 26 of 170 now.</p>", out)
+
+    def test_render_verdict_names_the_probable_cause_only_when_worse(self):
+        out = report.render(fixture())
+        self.assertIn("<strong>Probable cause:</strong> Claude Code 2.1.285: default effort lowered to medium.", out)
+        a = fixture()
+        a.verdict = "no_change"
+        self.assertNotIn("Probable cause", report.render(a))
+
+    def test_render_shows_each_fact_once(self):
+        out = report.render(fixture())
+        for text in ("+6 pts", "Changed the default effort to medium", "3.2×", "CLAUDE.md changed 2×",
+                     "On the same projects only"):
+            self.assertEqual(out.count(text), 1, text)
+        self.assertNotIn("Compactions per session", out)
+        self.assertIn("Median prompt length", out)
 
     def test_render_header_names_model_and_dates(self):
         out = report.render(fixture())
         self.assertIn("<title>Is Opus 5.5 nerfed?</title>", out)
-        self.assertIn('<p class="product">Model drift report</p><h1>Is Opus 5.5 nerfed?</h1>', out)
-        self.assertIn('<p class="meta">Compares your Opus 5.5 prompts before (Sep 7-20) with now (Sep 21-Oct 4). '
-                      'Other models do not count.</p>', out)
+        self.assertIn('<header><h1>Is Opus 5.5 nerfed?</h1>', out)
+        self.assertIn('<strong>Before</strong> Sep 7-20</span>', out)
+        self.assertIn('<strong>Now</strong> Sep 21-Oct 4</span>', out)
+
+    def test_render_verdict_shows_confidence_level(self):
+        out = report.render(fixture())
+        self.assertIn('<strong>High confidence</strong> 330 prompts over 27 days.', out)
+        self.assertEqual(out.count('<i class="on">'), 3)
 
     def test_render_header_without_model_asks_generic_question(self):
         out = report.render(Analysis(status="too_early"))
@@ -259,7 +275,7 @@ class RenderTest(unittest.TestCase):
             self.assertIn('class="status', out)
             self.assertIn(">%s<" % word, out)
         a = fixture()
-        a.verdict, a.signals, a.attribution = "no_change", a.signals[:1], []
+        a.verdict, a.signals, a.attribution, a.shared_verdict = "no_change", a.signals[:1], [], None
         a.side["recent"] = dict(a.side["base"])
         out = report.render(a)
         self.assertIn("Not nerfed", out)
@@ -272,20 +288,38 @@ class RenderTest(unittest.TestCase):
         out = report.render(a)
         self.assertIn(">Too few events<", out)
 
-    def test_render_behavior_has_one_row_per_signal(self):
+    def test_render_behavior_has_rows_only_for_signals_that_moved(self):
         out = report.render(fixture())
-        self.assertEqual(out.count('class="signal-row"'), 2)
+        self.assertEqual(out.count('class="signal-row"'), 1)
         self.assertIn("1.2 → 3.9 per 1,000 tool calls", out)
-        self.assertIn("8.0% → 9.1% of edits", out)
         self.assertIn(">↑ 3.2×<", out)
-        self.assertIn(">Same<", out)
+        self.assertIn("<p>No change in blind edits.</p>", out)
+        self.assertNotIn("8.0% → 9.1%", out)
 
-    def test_render_mistakes_as_figures_and_bars(self):
+    def test_render_mistakes_as_figures_with_counts(self):
         out = report.render(fixture())
         self.assertIn('class="verdict critical"', out)
-        self.assertIn('<span class="figure">9%</span>', out)
-        self.assertIn('<span class="figure now">15%</span>', out)
-        self.assertEqual(out.count('class="bar '), 2)
+        self.assertIn('<span class="figure">9%</span><span class="caption"><strong>Before</strong><br>15 of 160 prompts', out)
+        self.assertIn('<span class="figure now">15%</span><span class="caption"><strong>Now</strong><br>26 of 170 prompts', out)
+
+    def test_render_no_change_chip_when_no_prompt_has_a_mistake(self):
+        a = fixture()
+        a.boot.k_base = a.boot.k_recent = 0
+        a.boot.base_rate = a.boot.recent_rate = 0.0
+        out = report.render(a)
+        self.assertIn('<span class="figure now">0%</span>', out)
+        self.assertNotIn('class="delta', out)
+
+    def test_render_legend_groups_versions_and_names_incidents(self):
+        out = report.render(fixture())
+        self.assertEqual(out.count('class="key version"'), 1)
+        self.assertIn('<span class="key version"></span>Claude Code update</li>', out)
+        self.assertIn('<span class="key incident"></span>Sep 29, Elevated errors on Claude Code</li>', out)
+        self.assertNotIn("CLI 2.1.280</li>", out)
+
+    def test_render_embeds_the_font(self):
+        out = report.render(fixture())
+        self.assertIn('src: url("data:font/woff2;base64,', out)
 
     def test_render_details_are_closed_and_hold_the_extras(self):
         out = report.render(fixture())
@@ -308,7 +342,8 @@ class RenderTest(unittest.TestCase):
         a.verdict = "no_change"
         a.boot.k_base = a.boot.k_recent = 0
         out = report.render(a)
-        self.assertNotIn("90% interval ×", out)
+        self.assertNotIn('class="stats"', out)
+        self.assertIn('class="stats"', report.render(fixture()))
 
     def test_render_escapes_html(self):
         a = fixture()
@@ -332,7 +367,7 @@ class RenderTest(unittest.TestCase):
 
     def test_render_offline_and_no_compare(self):
         a = fixture()
-        a.overlay_ok, a.compare, a.attribution = False, None, []
+        a.overlay_ok, a.compare, a.attribution, a.harness = False, None, [], []
         out = report.render(a)
         self.assertIn("The changelog was not checked (offline).", out)
         self.assertNotIn("less controlled", out)

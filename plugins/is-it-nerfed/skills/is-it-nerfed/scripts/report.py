@@ -1,6 +1,7 @@
 """Turn an Analysis into the terminal summary and one self-contained HTML report."""
 from __future__ import annotations
 
+import base64
 import json
 import re
 from datetime import date, timedelta
@@ -37,7 +38,7 @@ WORSE = {v for v, (kind, _, _, _) in VERDICTS.items() if kind in ("critical", "w
 BETTER = {"better", "leaning_better"}
 STATUS_TEXT: Dict[str, str] = {
     "too_early": "too early: fewer than 3 active days, no verdict yet",
-    "judge_drift": "no verdict: the judge matched only %s of the anchor labels (it needs 80%%)",
+    "judge_drift": "no verdict: the judge got only %s of the test prompts right (it needs 80%%)",
     "no_labels": "no verdict: one window has no labeled prompts",
 }
 ROLL_DAYS = 5
@@ -47,6 +48,7 @@ LOW_DAYS, LOW_PROMPTS = 5, 50
 HIGH_DAYS, HIGH_PROMPTS = 7, 150
 TEMPLATE = Path(__file__).with_name("report_template.html")
 CHARTJS = Path(__file__).with_name("vendor") / "chart.umd.min.js"
+FONT = Path(__file__).with_name("vendor") / "Geist-Variable.woff2"
 
 
 # ---------- small formatters ----------
@@ -83,10 +85,6 @@ def _pts(x: float) -> str:
 
 def _times(ratio: float) -> str:
     return "×%.1f" % ratio
-
-
-def _times_interval(ratio: float, lo: float, hi: float) -> str:
-    return "%s (%s to %s)" % (_times(ratio), _times(lo), _times(hi))
 
 
 def _cap(text: str) -> str:
@@ -190,22 +188,19 @@ def _behavior_text(a: Analysis) -> str:
     return "No change in %s%s or %s." % (", ".join(names[:-1]), "," if len(names) > 2 else "", names[-1])
 
 
-def _setup_parts(side: Dict[str, dict]) -> List[str]:
-    """Sentences for each setup change that can affect the result."""
-    base, recent = side["base"], side["recent"]
+def _setup_parts(a: Analysis) -> List[Tuple[str, str]]:
+    """An icon name and a sentence for each setup change that can affect the result."""
     parts = []
-    if recent["claude_md_edits"] > 0:
-        parts.append("CLAUDE.md changed %d×." % recent["claude_md_edits"])
-    if base["top_projects"] and recent["top_projects"]:
-        top_b, top_r = base["top_projects"][0][0], recent["top_projects"][0][0]
-        if top_b != top_r:
-            short = short_projects([top_b, top_r])
-            parts.append("Main project changed: %s → %s." % (short[top_b], short[top_r]))
+    if a.side["recent"]["claude_md_edits"] > 0:
+        parts.append(("file-text", "CLAUDE.md changed %d×." % a.side["recent"]["claude_md_edits"]))
+    if a.shared_verdict:
+        parts.append(("folder", "Your project mix changed. On the same projects only, it is %s."
+                      % VERDICTS[a.shared_verdict][2]))
     return parts
 
 
-def _setup_text(side: Dict[str, dict]) -> str:
-    return " ".join(_setup_parts(side)) or "No change that can affect the result."
+def _setup_text(a: Analysis) -> str:
+    return " ".join(text for _, text in _setup_parts(a)) or "No change that can affect the result."
 
 
 def _claude_code_text(a: Analysis) -> str:
@@ -220,18 +215,23 @@ def _claude_code_text(a: Analysis) -> str:
     return count if a.attribution else count + " None can change model quality."
 
 
-def _confidence_text(a: Analysis) -> str:
+def _confidence(a: Analysis) -> Tuple[str, str]:
+    """The confidence level (Low, Medium or High) and its reason."""
     b = a.boot
     labeled = [d for d, _, n in a.daily if n]
     recent_days = len([d for d in labeled if d >= a.recent[0]])
     if recent_days < LOW_DAYS:
-        return "Low. Only %d recent day%s. Run again after %s." % (
+        return "Low", "Only %d recent day%s. Run again after %s." % (
             recent_days, "" if recent_days == 1 else "s", _day(a.recent[1] + timedelta(days=LOW_DAYS - recent_days)))
     fewest = min(b.n_base, b.n_recent)
     if fewest < LOW_PROMPTS:
-        return "Low. Only %d prompts in one window." % fewest
+        return "Low", "Only %d prompts in one window." % fewest
     level = "High" if recent_days >= HIGH_DAYS and fewest >= HIGH_PROMPTS else "Medium"
-    return "%s. %d prompts over %d days." % (level, b.n_base + b.n_recent, len(labeled))
+    return level, "%d prompts over %d days." % (b.n_base + b.n_recent, len(labeled))
+
+
+def _confidence_text(a: Analysis) -> str:
+    return "%s. %s" % _confidence(a)
 
 
 def _display_path(path: Path) -> str:
@@ -248,7 +248,7 @@ def summary(a: Analysis, report_path: Path) -> List[str]:
         _titled("Verdict", _verdict_text(a)),
         _titled("Model mistakes", _mistakes_text(a)),
         _titled("Agent behavior", _behavior_text(a)),
-        _titled("Your setup", _setup_text(a.side)),
+        _titled("Your setup", _setup_text(a)),
         _titled("Claude Code", _claude_code_text(a)),
         _titled("Confidence", _confidence_text(a)),
         last,
@@ -296,47 +296,101 @@ def trend_data(daily: List[Tuple[date, int, int]], markers: List[Tuple[date, str
 
 # ---------- HTML sections ----------
 
-# Icon paths from Tabler Icons (MIT), inlined so the report loads nothing from the web.
+# Icon paths from Tabler Icons 3.19 outline (MIT), inlined so the report loads nothing from the web.
 ICONS: Dict[str, str] = {
     "good": '<path d="M5 12l5 5l10 -10"/>',
     "warning": '<path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214'
                'a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/>',
     "critical": '<path d="M18 6l-12 12"/><path d="M6 6l12 12"/>',
     "neutral": '<path d="M5 12l14 0"/>',
+    "calendar": '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12z"/>'
+                '<path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M11 15h1"/><path d="M12 15v3"/>',
+    "message-report": '<path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z"/>'
+                      '<path d="M12 8v3"/><path d="M12 14v.01"/>',
+    "robot": '<path d="M6 4m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"/><path d="M12 2v2"/>'
+             '<path d="M9 12v9"/><path d="M15 12v9"/><path d="M5 16l4 -2"/><path d="M15 14l4 2"/><path d="M9 18h6"/>'
+             '<path d="M10 8v.01"/><path d="M14 8v.01"/>',
+    "adjustments-horizontal": '<path d="M14 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M4 6l8 0"/><path d="M16 6l4 0"/>'
+                              '<path d="M8 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M4 12l2 0"/>'
+                              '<path d="M10 12l10 0"/><path d="M17 18m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/>'
+                              '<path d="M4 18l11 0"/><path d="M19 18l1 0"/>',
+    "terminal-2": '<path d="M8 9l3 3l-3 3"/><path d="M13 15l3 0"/>'
+                  '<path d="M3 4m0 2a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z"/>',
+    "chart-line": '<path d="M4 19l16 0"/><path d="M4 15l4 -6l4 2l4 -5l4 4"/>',
+    "quote": '<path d="M10 11h-4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v6c0 2.667 -1.333 4.333 -4 5"/>'
+             '<path d="M19 11h-4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v6c0 2.667 -1.333 4.333 -4 5"/>',
+    "table": '<path d="M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14z"/>'
+             '<path d="M3 10h18"/><path d="M10 3v18"/>',
+    "info-circle": '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/>',
+    "eye": '<path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>'
+           '<path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"/>',
+    "checks": '<path d="M7 12l5 5l10 -10"/><path d="M2 12l5 5m5 -5l5 -5"/>',
+    "arrows-diff": '<path d="M11 16h10"/><path d="M11 16l4 4"/><path d="M11 16l4 -4"/><path d="M13 8h-10"/>'
+                   '<path d="M13 8l-4 4"/><path d="M13 8l-4 -4"/>',
+    "activity": '<path d="M3 12h4l3 8l4 -16l3 8h4"/>',
+    "target": '<path d="M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0"/>'
+              '<path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>',
+    "file-text": '<path d="M14 3v4a1 1 0 0 0 1 1h4"/>'
+                 '<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/>'
+                 '<path d="M9 9l1 0"/><path d="M9 13l6 0"/><path d="M9 17l6 0"/>',
+    "folder": '<path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2"/>',
 }
+CONFIDENCE_BARS = {"Low": 1, "Medium": 2, "High": 3}
+
+
+def _icon(name: str) -> str:
+    return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">%s</svg>' % ICONS[name]
+
+
+def _tile(name: str) -> str:
+    return '<span class="tile">%s</span>' % _icon(name)
 
 
 def _status(kind: str, word: str) -> str:
-    return ('<span class="status %s"><svg viewBox="0 0 24 24" aria-hidden="true">%s</svg>%s</span>'
-            % (kind, ICONS[kind], word))
+    return '<span class="status %s">%s%s</span>' % (kind, _icon(kind), word)
 
 
 def _question(a: Analysis) -> str:
     return "Is %s nerfed?" % (model_name(a.model) if a.model else "your model")
 
 
+def _window_chip(label: str, w: Window) -> str:
+    return '<span class="chip">%s<strong>%s</strong> %s</span>' % (_icon("calendar"), label, span(w))
+
+
 def _header(a: Analysis) -> str:
     when = ""
     if a.base and a.recent:
-        when = ('<p class="meta">Compares your %s prompts before (%s) with now (%s). Other models do not count.</p>'
-                % (escape(model_name(a.model)), span(a.base), span(a.recent)))
-    return '<header><p class="product">Model drift report</p><h1>%s</h1>%s</header>' % (escape(_question(a)), when)
+        when = '<div class="windows">%s%s</div>' % (_window_chip("Before", a.base), _window_chip("Now", a.recent))
+    return '<header><h1>%s</h1>%s</header>' % (escape(_question(a)), when)
+
+
+def _meter(level: str) -> str:
+    on = CONFIDENCE_BARS[level]
+    return '<span class="meter" aria-hidden="true">%s</span>' % "".join(
+        '<i class="%s"></i>' % ("on" if i < on else "") for i in range(3))
 
 
 def _verdict_panel(a: Analysis) -> str:
     if a.status != "ok":
-        return ('<section class="verdict">%s<p class="verdict-text">%s</p></section>'
-                % (_status("neutral", "No verdict yet"), escape(_no_verdict_text(a))))
+        return ('<section class="verdict neutral"><span class="verdict-icon">%s</span><div>'
+                '<p class="verdict-word">No verdict yet</p><p class="verdict-text">%s</p></div></section>'
+                % (_icon("neutral"), escape(_no_verdict_text(a))))
     kind, word = VERDICTS[a.verdict][:2]
-    detail = _verdict_detail(a)
-    return ('<section class="verdict %s">%s<p class="verdict-text">%s</p>'
-            '<p class="confidence"><strong>Confidence</strong> %s</p></section>'
-            % (kind, _status(kind, word), escape(detail), escape(_confidence_text(a))))
+    level, reason = _confidence(a)
+    cause = ""
+    if a.verdict in WORSE and a.attribution:
+        cause = '<p class="cause">%s<span><strong>Probable cause:</strong> Claude Code %s.</span></p>' % (
+            _icon("terminal-2"), escape("; ".join(a.attribution)))
+    return ('<section class="verdict %s"><span class="verdict-icon">%s</span><div>'
+            '<p class="verdict-word">%s</p><p class="verdict-text">%s</p>%s'
+            '<p class="confidence">%s<strong>%s confidence</strong> %s</p></div></section>'
+            % (kind, _icon(kind), word, escape(_verdict_detail(a)), cause, _meter(level), level, escape(reason)))
 
 
-def _category(title: str, status: str, text: str, visual: str = "") -> str:
-    return ('<article class="category"><div class="category-head"><h2>%s</h2>%s</div><p>%s</p>%s</article>'
-            % (title, status, escape(text), visual))
+def _category(area: str, icon: str, title: str, status: str, body: str) -> str:
+    return ('<article class="category %s"><div class="category-head">%s<h2>%s</h2>%s</div>%s</article>'
+            % (area, _tile(icon), title, status, body))
 
 
 def _mistakes_status(a: Analysis) -> str:
@@ -347,22 +401,21 @@ def _mistakes_status(a: Analysis) -> str:
     return _status("good", "Same")
 
 
-def _mistakes_visual(a: Analysis) -> str:
-    """Two large figures and two plain bars on one shared scale."""
+def _delta(a: Analysis) -> str:
+    """The change in points, colored by the verdict and not by the sign, so noise never looks alarming."""
+    kind = VERDICTS[a.verdict][0] if a.verdict in WORSE or a.verdict in BETTER else "neutral"
+    return '<span class="delta %s">%s</span>' % (kind, _pts(a.boot.diff))
+
+
+def _mistakes_figures(a: Analysis) -> str:
+    """The two rates as large figures with their counts; no change chip when no prompt has a mistake."""
     b = a.boot
-    widest = max(b.base_rate, b.recent_rate, 1.0)
-    rows = (("before", "Before", b.base_rate, b.k_base, b.n_base),
-            ("now", "Now", b.recent_rate, b.k_recent, b.n_recent))
-    figures = ('<div class="figures"><div><span class="figure">%s</span><span class="caption">Before</span></div>'
-               '<span class="arrow" aria-hidden="true">→</span>'
-               '<div><span class="figure now">%s</span><span class="caption">Now</span></div></div>'
-               % (_pct(b.base_rate), _pct(b.recent_rate)))
-    bars = "".join('<div class="bar-row"><span class="caption">%s</span><span class="bar-track">'
-                   '<span class="bar %s" style="width:%.1f%%" data-tip="%s: %d of %d prompts"></span>'
-                   '</span></div>'
-                   % (label, kind, max(100 * rate / widest, 1.5), label, k, n)
-                   for kind, label, rate, k, n in rows)
-    return figures + '<div class="bars">%s</div>' % bars
+    figure = ('<div><span class="figure%s">%s</span><span class="caption"><strong>%s</strong><br>%d of %d prompts'
+              '</span>%s</div>')
+    return ('<div class="figures">%s<span class="arrow" aria-hidden="true">→</span>%s</div>'
+            % (figure % ("", _pct(b.base_rate), "Before", b.k_base, b.n_base, ""),
+               figure % (" now", _pct(b.recent_rate), "Now", b.k_recent, b.n_recent,
+                         _delta(a) if b.k_base or b.k_recent else "")))
 
 
 def _behavior_status(a: Analysis) -> str:
@@ -385,20 +438,35 @@ def _signal_values(r: SignalResult) -> str:
 def _signal_tag(r: SignalResult) -> str:
     if r.direction == "up":
         return '<span class="tag warning">↑ %.1f×</span>' % r.ratio
-    if r.direction == "down":
-        return '<span class="tag good">↓ %.1f×</span>' % r.ratio
-    return '<span class="tag neutral">Same</span>'
+    return '<span class="tag good">↓ %.1f×</span>' % r.ratio
 
 
-def _signal_rows(results: List[SignalResult]) -> str:
-    return '<ul class="signals">%s</ul>' % "".join(
+def _behavior_body(a: Analysis) -> str:
+    """A row per signal that moved, and one line that names the signals that did not."""
+    moved = _moved(a.signals)
+    if not moved:
+        return "<p>%s</p>" % escape(_behavior_text(a))
+    rows = '<ul class="signals">%s</ul>' % "".join(
         '<li class="signal-row"><span><strong>%s</strong><span class="caption">%s</span></span>%s</li>'
-        % (escape(_cap(r.signal.name)), escape(_signal_values(r)), _signal_tag(r))
-        for r in results) if results else ""
+        % (escape(_cap(r.signal.name)), escape(_signal_values(r)), _signal_tag(r)) for r in moved)
+    same = [r.signal.name for r in a.signals if not r.direction]
+    return rows + ("<p>No change in %s.</p>" % escape(", ".join(same)) if same else "")
 
 
 def _setup_status(a: Analysis) -> str:
-    return _status("warning", "Changed") if _setup_parts(a.side) else _status("good", "Same")
+    return _status("warning", "Changed") if _setup_parts(a) else _status("good", "Same")
+
+
+def _facts(items: List[Tuple[str, str]]) -> str:
+    """A list of icon names and HTML lines."""
+    return '<ul class="facts">%s</ul>' % "".join("<li>%s<span>%s</span></li>" % (_icon(i), html) for i, html in items)
+
+
+def _setup_body(a: Analysis) -> str:
+    parts = _setup_parts(a)
+    if not parts:
+        return "<p>%s</p>" % escape(_setup_text(a))
+    return _facts([(icon, escape(text)) for icon, text in parts])
 
 
 def _claude_code_status(a: Analysis) -> str:
@@ -409,58 +477,76 @@ def _claude_code_status(a: Analysis) -> str:
     return _status("good", "Same")
 
 
+def _claude_code_body(a: Analysis) -> str:
+    if not a.harness:
+        return "<p>%s</p>" % escape(_claude_code_text(a))
+    return _facts([("terminal-2", "<strong>%s</strong> %s.<br>%s" % (
+        escape(h["version"]), escape(h["line"]), escape(h["reason"]))) for h in a.harness])
+
+
 def _categories(a: Analysis) -> str:
+    """The possible causes first (your setup, Claude Code), then the evidence (mistakes, behavior)."""
     if a.status != "ok":
         return ""
-    b = a.boot
-    counts = "%d of %d prompts before, %d of %d now." % (b.k_base, b.n_base, b.k_recent, b.n_recent)
     return '<section class="categories">%s%s%s%s</section>' % (
-        _category("Model mistakes", _mistakes_status(a), counts, _mistakes_visual(a)),
-        _category("Agent behavior", _behavior_status(a), _behavior_text(a), _signal_rows(a.signals)),
-        _category("Your setup", _setup_status(a), _setup_text(a.side)),
-        _category("Claude Code", _claude_code_status(a), _claude_code_text(a)))
+        _category("setup", "adjustments-horizontal", "Your setup", _setup_status(a), _setup_body(a)),
+        _category("code", "terminal-2", "Claude Code", _claude_code_status(a), _claude_code_body(a)),
+        _category("mistakes", "message-report", "Model mistakes", _mistakes_status(a), _mistakes_figures(a)),
+        _category("behavior", "robot", "Agent behavior", _behavior_status(a), _behavior_body(a)))
+
+
+def _section_head(icon: str, title: str, meta: str = "") -> str:
+    return ('<div class="section-head">%s<div><h2>%s</h2>%s</div></div>'
+            % (_tile(icon), title, '<p class="meta">%s</p>' % meta if meta else ""))
 
 
 def _trend(a: Analysis) -> str:
     if not a.daily:
         return ""
-    marks = "".join('<li><span class="key %s"></span>%s, %s</li>'
-                    % (kind, _day(d), escape(_marker_label(kind, label)))
-                    for d, kind, label in a.markers)
-    return ('<section class="trend"><h2>Model mistakes by day</h2>'
-            '<p class="meta">Share of your prompts where you corrected a mistake the model made, '
-            'over 5 days. Point at a day to see its numbers.</p>'
+    # Versions share one legend entry (the chart tooltip names each one); incidents keep their own.
+    marks = "".join('<li><span class="key incident"></span>%s, %s</li>' % (_day(d), escape(label))
+                    for d, kind, label in a.markers if kind == "incident")
+    if any(kind == "version" for _, kind, _ in a.markers):
+        marks = '<li><span class="key version"></span>Claude Code update</li>' + marks
+    return ('<section class="trend">%s'
             '<figure><div class="chart-box"><canvas id="trend" role="img" aria-label="Share of prompts with a '
             'model mistake, as a 5-day rate"></canvas></div><figcaption><ul class="legend">'
             '<li><span class="key roll"></span>5-day rate</li><li><span class="key avg"></span>Window average</li>'
             '%s</ul></figcaption></figure></section>'
-            % marks)
+            % (_section_head("chart-line", "Model mistakes by day",
+                             "Prompts where you corrected the model, as a 5-day rate."), marks))
 
 
-def _receipts(title: str, items: List[dict]) -> str:
-    body = "".join('<figure class="receipt"><blockquote>%s</blockquote><figcaption>%s. %s</figcaption></figure>'
-                   % (escape(r["quote"]), _day(date.fromisoformat(r["date"])), escape(r["reason"]))
-                   for r in items) or '<p class="meta">No model mistakes in this window.</p>'
-    return "<div><h3>%s</h3>%s</div>" % (title, body)
+def _details(icon: str, title: str, body: str) -> str:
+    return ('<details><summary>%s<span class="summary-title">%s</span></summary>'
+            '<div class="details-body">%s</div></details>' % (
+        _tile(icon), title, body))
+
+
+def _receipts(label: str, w: Window, items: List[dict]) -> str:
+    body = "".join('<figure class="receipt">%s<blockquote>%s</blockquote><figcaption><strong>%s.</strong> %s'
+                   '</figcaption></figure>'
+                   % (_icon("quote"), escape(r["quote"]), _day(date.fromisoformat(r["date"])), escape(r["reason"]))
+                   for r in items) or '<p>No model mistakes in this window.</p>'
+    return '<div><h3><span class="chip"><strong>%s</strong> %s</span></h3>%s</div>' % (label, span(w), body)
 
 
 def _examples(a: Analysis) -> str:
     if not a.receipts:
         return ""
-    return ('<details><summary>Examples where you corrected the model</summary>'
-            '<p class="meta">These quotes are your own prompts. This file stays on your computer.</p>'
-            '<div class="receipts">%s%s</div></details>'
-            % (_receipts("Before, " + span(a.base), a.receipts.get("base", [])),
-               _receipts("Now, " + span(a.recent), a.receipts.get("recent", []))))
+    return _details("quote", "Examples where you corrected the model",
+                    '<p class="note">These quotes are your own prompts. This file stays on your computer.</p>'
+                    '<div class="receipts">%s%s</div>'
+                    % (_receipts("Before", a.base, a.receipts.get("base", [])),
+                       _receipts("Now", a.recent, a.receipts.get("recent", []))))
 
 
 def _projects(top: List[Tuple[str, float]], short: Dict[str, str]) -> str:
     return "<br>".join("%s %s" % (escape(short[n]), _pct(100 * s)) for n, s in top) or "none"
 
 
+# The setup numbers the cards do not show; the table keeps only the rows that changed.
 SIDE_ROWS = [
-    ("CLAUDE.md edits", lambda s, short: str(s["claude_md_edits"])),
-    ("CLI versions", lambda s, short: escape(", ".join(s["cli_versions"])) or "none"),
     ("Median prompt length", lambda s, short: "%d characters" % s["median_prompt_chars"]),
     ("Project mix", lambda s, short: _projects(s["top_projects"], short)),
     ("Compactions per session", lambda s, short: "%.1f" % s["compactions_per_session"]),
@@ -470,34 +556,27 @@ SIDE_ROWS = [
 ]
 
 
+def _stat(label: str, value: str) -> str:
+    return '<div class="stat"><span class="caption">%s</span><strong>%s</strong></div>' % (label, value)
+
+
 def _numbers(a: Analysis) -> str:
     if a.status != "ok":
         return ""
-    out = ['<details><summary>All numbers</summary>']
+    out = []
     b = a.boot
     if b.k_base or b.k_recent:
-        out.append('<p>Model mistakes: %s, 90%% interval %s to %s (%s).</p>'
-                   % (_times(b.ratio), _times(b.ratio_lo), _times(b.ratio_hi), _pts(b.diff)))
-    if a.shared_verdict:
-        out.append('<p>Your project mix changed. On projects that appear in both windows, the verdict is %s; '
-                   'on all projects, it is %s.</p>' % (VERDICTS[a.shared_verdict][2], VERDICTS[a.verdict][2]))
-    if a.signals:
-        out.append('<h3>Agent behavior</h3><table><thead><tr><th></th><th>Before</th><th>Now</th>'
-                   '<th>Change, 95%% range</th></tr></thead><tbody>%s</tbody></table>'
-                   % "".join('<tr><th scope="row">%s</th><td>%.1f</td><td>%.1f</td><td>%s</td></tr>'
-                             % (escape(r.signal.label), r.base_rate, r.recent_rate,
-                                _times_interval(r.ratio, r.lo, r.hi)) for r in a.signals))
+        out.append('<div class="stats">%s%s</div>'
+                   % (_stat("Mistakes now vs before", _times(b.ratio)),
+                      _stat("90% interval", "%s to %s" % (_times(b.ratio_lo), _times(b.ratio_hi)))))
     if a.side:
         short = _side_names(a.side)
-        out.append('<h3>Your setup</h3><table><thead><tr><th></th><th>Before</th><th>Now</th></tr></thead>'
-                   '<tbody>%s</tbody></table>'
-                   % "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>'
-                             % (label, cell(a.side["base"], short), cell(a.side["recent"], short))
-                             for label, cell in SIDE_ROWS))
-    if a.harness:
-        out.append('<h3>Claude Code changes that can change model quality</h3><dl>%s</dl>'
-                   % "".join("<dt>%s</dt><dd>%s<span>%s</span></dd>"
-                             % (escape(h["version"]), escape(h["line"]), escape(h["reason"])) for h in a.harness))
+        rows = [(label, cell(a.side["base"], short), cell(a.side["recent"], short)) for label, cell in SIDE_ROWS]
+        rows = [r for r in rows if r[1] != r[2]]
+        if rows:
+            out.append('<h3>Other setup changes</h3><table><thead><tr><th></th><th>Before</th><th>Now</th></tr>'
+                       '</thead><tbody>%s</tbody></table>'
+                       % "".join('<tr><th scope="row">%s</th><td>%s</td><td>%s</td></tr>' % r for r in rows))
     if a.compare is not None:
         c = a.compare
         out.append('<h3>Against %s</h3><p>Less controlled: different weeks. Verdict: %s. %s: %s of %d prompts. '
@@ -505,19 +584,23 @@ def _numbers(a: Analysis) -> str:
                    % (escape(model_name(a.prev_model)), VERDICTS[a.compare_verdict][2],
                       escape(model_name(a.prev_model)), _pct(c.base_rate), c.n_base,
                       escape(model_name(a.model)), _pct(c.recent_rate), c.n_recent))
-    out.append("</details>")
-    return "".join(out)
+    return _details("table", "All numbers", "".join(out)) if out else ""
+
+
+METHOD_STEPS = [
+    ("eye", "A Sonnet judge reads a sample of your prompts."),
+    ("checks", "It marks each prompt where you corrected a model mistake."),
+    ("arrows-diff", "The report compares that share now with the share before."),
+    ("activity", 'Agent behavior comes from your logs, with no judge. A firm "worse" verdict needs it to rise too.'),
+]
 
 
 def _method(a: Analysis) -> str:
-    judge = ""
+    steps = list(METHOD_STEPS)
     if a.judge_agreement is not None:
-        judge = " The judge matched %s of the anchor labels." % _pct(100 * a.judge_agreement)
-    return ('<details><summary>How this works</summary>'
-            '<p>A Sonnet judge reads a sample of your prompts. For each one, it decides if you corrected a '
-            'mistake that the model made. The report compares the share of those prompts in the recent days '
-            'with the share in the days before. Agent behavior counts come from your logs and use no judge. '
-            'A firm "worse" verdict needs one of them to rise too.%s</p></details>' % judge)
+        steps.append(("target", "The judge got %s of the test prompts right." % _pct(100 * a.judge_agreement)))
+    return _details("info-circle", "How this works", '<ol class="steps">%s</ol>' % "".join(
+        "<li>%s<span>%s</span></li>" % (_tile(icon), escape(text)) for icon, text in steps))
 
 
 def _script_json(data: dict) -> str:
@@ -527,6 +610,7 @@ def _script_json(data: dict) -> str:
 def render(a: Analysis) -> str:
     trend = trend_data(a.daily, a.markers, chart_windows(a)) if a.daily else None
     return Template(TEMPLATE.read_text(encoding="utf-8")).substitute(
+        font=base64.b64encode(FONT.read_bytes()).decode("ascii"),
         chartjs=CHARTJS.read_text(encoding="utf-8") if trend else "",
         trend_data=_script_json(trend) if trend else "null",
         title=escape(_question(a)),

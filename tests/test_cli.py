@@ -137,7 +137,7 @@ class CliTest(unittest.TestCase):
         self.write_labels(scan, judge_ok=False)
         result = self.run_cli("report", "--final")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("anchor labels", result.stdout)
+        self.assertIn("test prompts right", result.stdout)
 
     def test_second_scan_labels_the_windows_again(self):
         scan = self.scan()
