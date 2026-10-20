@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- Source of preview.png (1280x640). Render: chrome --headless=new --window-size=1280,640 --screenshot=preview.png preview.html -->
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500;700&display=block" rel="stylesheet">
+<style>
+:root { --bg:#E9EEF4; --ink:#0F1B33; --ink2:#3A4A66; --base:#7D8BA3; --bad:#E0312F; --card:#FFFFFF; }
+* { box-sizing:border-box; margin:0; }
+html,body { width:1280px; height:640px; background:var(--bg); color:var(--ink); overflow:hidden; }
+body { font-family:"Bricolage Grotesque",sans-serif; display:grid; grid-template-columns:540px 1fr; gap:48px; padding:72px 72px 64px; }
+h1 { font-weight:800; font-size:112px; line-height:.9; letter-spacing:-.028em; }
+.lede { margin-top:30px; font-size:29px; line-height:1.32; font-weight:500; color:var(--ink2); max-width:450px; text-wrap:balance; }
+.cmd { margin-top:40px; display:inline-block; font:700 26px "JetBrains Mono",monospace; background:var(--ink); color:#fff; padding:14px 22px; border-radius:10px; }
+.panel { background:var(--card); border-radius:22px; padding:40px 40px 36px; align-self:center; box-shadow:0 1px 0 #cfd8e4, 0 24px 48px -28px rgba(15,27,51,.35); }
+.panel h2 { font-size:25px; font-weight:500; color:var(--ink2); }
+.row { display:grid; grid-template-columns:100px 1fr; align-items:center; gap:12px; margin-top:28px; font-size:28px; font-weight:500; }
+.row:first-of-type { margin-top:36px; }
+.track { display:flex; align-items:center; gap:16px; width:250px; }
+.bar { flex:none; display:block; height:60px; border-radius:10px; background:var(--base); }
+.value { font-weight:800; font-size:40px; color:var(--base); }
+.now .bar { background:var(--bad); }
+.now .value { color:var(--bad); }
+.verdict { margin-top:36px; padding-top:24px; border-top:2px solid var(--bg); font:500 22px/1.45 "JetBrains Mono",monospace; }
+.verdict b { color:var(--bad); font-weight:700; }
+</style></head>
+<body>
+<div>
+  <h1>Is it<br>nerfed?</h1>
+  <p class="lede">Your own Claude Code logs tell you if the model got worse for you.</p>
+  <div class="cmd">/is-it-nerfed</div>
+</div>
+<div class="panel">
+  <h2>How often you had to correct the model</h2>
+  <div class="row"><span class="label">Before</span><span class="track"><span class="bar" style="width:60%"></span><span class="value">9%</span></span></div>
+  <div class="row now"><span class="label">Now</span><span class="track"><span class="bar" style="width:100%"></span><span class="value">15%</span></span></div>
+  <p class="verdict"><b>Nerfed for you.</b> Opus is slightly<br>worse for you (78% probability).</p>
+</div>
+</body></html>
