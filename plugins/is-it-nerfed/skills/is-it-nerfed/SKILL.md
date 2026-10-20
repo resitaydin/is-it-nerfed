@@ -15,7 +15,8 @@ local session logs and samples prompts. Sonnet subagents label each prompt: did 
 to steer the model, and was the model the cause? The script then compares a recent window with
 a baseline window and writes a verdict.
 
-`${CLAUDE_SKILL_DIR}` is the folder of this skill. Run every command below as written.
+`${CLAUDE_SKILL_DIR}` is the folder of this skill. Run every command below as written, alone:
+do not add `echo`, pipes or other commands to it, because then it needs the user's approval.
 
 ## Privacy rules
 
