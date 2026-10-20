@@ -18,11 +18,11 @@ claude plugin marketplace add resitaydin/is-it-nerfed && claude plugin install i
 ## Run
 
 In any Claude Code session, type `/is-it-nerfed`, or just ask "did Claude get dumber?".
-Claude shows the token cost and asks before it starts. You get 7 lines:
+Claude shows the token cost and the time, and asks before it starts. You get 7 lines:
 
 ```
 Verdict:        Nerfed for you. Opus 5.5 is slightly worse for you (78% probability).
-Model mistakes: 15 of 160 prompts before (9%, Sep 24–28), 26 of 170 now (15%, Sep 30–Oct 4).
+Model mistakes: 15 of 160 prompts before (9%, Sep 24-28), 26 of 170 now (15%, Sep 30-Oct 4).
 Agent behavior: Interrupts 3.2× as often as before.
 Your setup:     CLAUDE.md changed 2×.
 Claude Code:    2.1.285: default effort lowered to medium. This can explain the drift.
@@ -43,8 +43,8 @@ The HTML report adds a chart, the Claude Code releases, and the status incidents
 ## Cost
 
 About 1.4k Sonnet tokens per prompt, on your own Claude plan. Each run labels up to 600
-prompts (about 0.9M tokens). A run does not reuse old labels: one judge labels both windows,
-so a change of the judge cannot look like a change of the model.
+prompts (about 0.9M tokens) and takes about 3 minutes. A run does not reuse old labels: one
+judge labels both windows, so a change of the judge cannot look like a change of the model.
 
 ## Tip: keep more history
 

@@ -1,6 +1,6 @@
 # Judge evaluation
 
-This folder measures the judge against labels that the author corrects by hand.
+This folder measures the judge against reference labels from two stronger models, Opus and Fable.
 The verdict counts only one label: steering that the model caused. The release gate scores only that label.
 It needs 30 or more reference positives, a kappa of 0.7 or more, and a false-alarm rate of 1% or less.
 The folder `eval/data/` is git-ignored. It holds private prompts.
@@ -12,7 +12,8 @@ The folder `eval/data/` is git-ignored. It holds private prompts.
    Half of the items come from prompts that follow an interrupt or start with a negation word.
 2. Ask Claude to label `items.jsonl` with `judge-prompt.md`. Write the result to `eval/data/pred.jsonl`.
    Use one Sonnet agent for each 40 items. Use the same dispatch text as the skill.
-3. Copy `pred.jsonl` to `gold.jsonl`. Correct each line by hand.
+3. Label `items.jsonl` again with Opus agents and with Fable agents, in the same way.
+   Write to `gold.jsonl` only the items where Opus and Fable agree on the model-caused label.
    Do not open `key.jsonl` during this step. The key holds the date and the model.
 4. Run `python3 eval/score.py eval/data/gold.jsonl eval/data/pred.jsonl`.
    The script scores only the ids that are in both files. It prints how many ids it skipped.
@@ -33,7 +34,7 @@ The gate metrics use one binary label: `kind == steering` and `cause == model`.
 
 ## Attempts
 
-The reference is the consensus of independent Opus and Fable labels (175 of 200 items), because the author chose model reference labels instead of hand labels; Opus vs Fable agreement is 0.88 / 0.67, which is the ceiling.
+The reference is the consensus of independent Opus and Fable labels (175 of 200 items). Opus vs Fable agreement is 0.88 / 0.67, which is the ceiling.
 
 | Date | Attempt | Judge and prompt | Kappa steering | Kappa cause | Model-caused precision | Model-caused recall |
 | ---- | ------- | ---------------- | -------------- | ----------- | ---------------------- | ------------------- |

@@ -1,7 +1,7 @@
 {
   "name": "is-it-nerfed",
   "version": "0.1.0",
-  "description": "Checks your own Claude Code session logs to tell if your model got worse for you.",
+  "description": "Checks your own Claude Code logs to tell if Claude got worse for you.",
   "author": {
     "name": "resitaydin"
   },

@@ -1,4 +1,4 @@
-"""Score judge labels (pred) against hand-corrected labels (gold)."""
+"""Score judge labels (pred) against reference labels (gold)."""
 from __future__ import annotations
 
 import argparse
