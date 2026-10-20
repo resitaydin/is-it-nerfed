@@ -11,6 +11,8 @@ an earlier window and gives you a verdict.
 
 ## Install
 
+macOS and Linux (on Windows, use WSL).
+
 ```
 claude plugin marketplace add resitaydin/is-it-nerfed && claude plugin install is-it-nerfed@is-it-nerfed
 ```
