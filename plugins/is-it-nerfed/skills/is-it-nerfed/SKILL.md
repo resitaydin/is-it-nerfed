@@ -75,21 +75,22 @@ If the user says no, stop. Do not label anything.
 Write: `Step 2 of 3: labeling <T> batches with Sonnet, 4 at a time…`, where T is the number of
 agents (the `batches` count, plus 1 when `interpret_batch` is not null).
 
-Start every labeling agent in the background with `subagent_type: "is-it-nerfed:labeler"`. That
-agent runs on Sonnet and has only the Read and Write tools.
+Start every labeling agent in the background. The agents run on Sonnet, have only the Read and
+Write tools, and already hold their label rules.
 
-For each path in `batches`, start one agent with the description `Label batch <i> of <T>` and
-this prompt (put in the real paths):
+For each path in `batches`, start one agent with `subagent_type: "is-it-nerfed:judge"`, the
+description `Label batch <i> of <T>`, and this prompt (put in the real paths):
 
-> Read ${CLAUDE_SKILL_DIR}/judge-prompt.md. Then label every item in <batch path> and write
-> the labels to <labels_dir>/<batch file name>. Reply with only: done <lines written>.
+> Label every item in <batch path> and write the labels to <labels_dir>/<batch file name>.
+> Reply with only: done <lines written>.
 
 `<batch file name>` is the last part of the batch path, for example `batch-003.jsonl`.
 
-If `interpret_batch` is not null, start one more agent:
+If `interpret_batch` is not null, start one more agent with
+`subagent_type: "is-it-nerfed:interpreter"`:
 
-> Read ${CLAUDE_SKILL_DIR}/interpret-prompt.md. Then label every item in <interpret_batch>
-> and write the labels to <interpret_labels>. Reply with only: done <lines written>.
+> Label every item in <interpret_batch> and write the labels to <interpret_labels>.
+> Reply with only: done <lines written>.
 
 Run at most 4 agents at a time. Start the next agent when one finishes. If an agent fails or
 writes fewer lines, continue with the others. The report step finds missing labels and asks

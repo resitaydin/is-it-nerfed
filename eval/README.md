@@ -10,14 +10,14 @@ The folder `eval/data/` is git-ignored. It holds private prompts.
 1. Run `python3 eval/make_set.py --n 200 --seed 1`.
    The script writes `eval/data/items.jsonl` and `eval/data/key.jsonl`.
    Half of the items come from prompts that follow an interrupt or start with a negation word.
-2. Ask Claude to label `items.jsonl` with `judge-prompt.md`. Write the result to `eval/data/pred.jsonl`.
-   Use one Sonnet agent for each 40 items. Use the same dispatch text as the skill.
+2. Ask Claude to label `items.jsonl` with the `is-it-nerfed:judge` agent. Write the result to `eval/data/pred.jsonl`.
+   Use one agent for each 40 items. Use the same dispatch text as the skill.
 3. Label `items.jsonl` again with Opus agents and with Fable agents, in the same way.
    Write to `gold.jsonl` only the items where Opus and Fable agree on the model-caused label.
    Do not open `key.jsonl` during this step. The key holds the date and the model.
 4. Run `python3 eval/score.py eval/data/gold.jsonl eval/data/pred.jsonl`.
    The script scores only the ids that are in both files. It prints how many ids it skipped.
-5. Check the gate. If it fails, change `judge-prompt.md`, run steps 2 to 4 again, and add a row to the table.
+5. Check the gate. If it fails, change `plugins/is-it-nerfed/agents/judge.md`, run steps 2 to 4 again, and add a row to the table.
 
 ## Metrics
 
