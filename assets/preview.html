@@ -7,6 +7,7 @@
 * { box-sizing:border-box; margin:0; }
 html,body { width:1280px; height:640px; background:var(--bg); color:var(--ink); overflow:hidden; }
 body { font-family:"Bricolage Grotesque",sans-serif; display:grid; grid-template-columns:540px 1fr; gap:48px; padding:72px 72px 64px; }
+.tag { display:inline-block; margin-bottom:22px; font:700 19px "JetBrains Mono",monospace; letter-spacing:.04em; text-transform:uppercase; color:var(--ink2); border:2px solid var(--ink2); padding:6px 12px; border-radius:8px; }
 h1 { font-weight:800; font-size:112px; line-height:.9; letter-spacing:-.028em; }
 .lede { margin-top:30px; font-size:29px; line-height:1.32; font-weight:500; color:var(--ink2); max-width:450px; text-wrap:balance; }
 .cmd { margin-top:40px; display:inline-block; font:700 26px "JetBrains Mono",monospace; background:var(--ink); color:#fff; padding:14px 22px; border-radius:10px; }
@@ -24,8 +25,9 @@ h1 { font-weight:800; font-size:112px; line-height:.9; letter-spacing:-.028em; }
 </style></head>
 <body>
 <div>
+  <div class="tag">Claude Code plugin</div>
   <h1>Is it<br>nerfed?</h1>
-  <p class="lede">Your own Claude Code logs tell you if the model got worse for you.</p>
+  <p class="lede">Claude feels dumber lately? Your own logs have the receipts.</p>
   <div class="cmd">/is-it-nerfed</div>
 </div>
 <div class="panel">
